@@ -1,11 +1,21 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from '@/firebase/auth';
-import { getUserProfile, UserProfile, updateLastLogin } from '@/services/userService';
+import { UserProfile, updateLastLogin } from '@/services/userService';
 import { logout as authServiceLogout } from '@/services/authService';
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from '@/firebase/firestore';
 import { StaffProfile } from '@/types/timetable';
+
+const logAuthFirestoreError = (label: string, err: any, currentUser: User | null, targetUid?: string | null) => {
+  console.error(label, {
+    code: err?.code || 'unknown',
+    message: err?.message || String(err),
+    currentUserUid: currentUser?.uid || null,
+    currentUserEmail: currentUser?.email || null,
+    targetUid: targetUid || currentUser?.uid || null,
+  }, err);
+};
 
 interface AuthContextType {
   user: User | null;
@@ -93,7 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           existingData = userDocSnap.data() as UserProfile;
         }
       } catch (readErr) {
-        console.warn('Initial user profile read notice:', readErr);
+        logAuthFirestoreError('Initial user profile read failed:', readErr, currentUser, activeUid);
       }
 
       const normalizedEmail = (currentUser.email || existingData?.email || '').toLowerCase().trim();
@@ -125,7 +135,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           await setDoc(userDocRef, adminProfile, { merge: true });
         } catch (err) {
-          console.warn('Notice: Failed to persist admin profile in Firestore users collection:', err);
+          logAuthFirestoreError('Failed to persist admin profile in Firestore users collection:', err, currentUser, activeUid);
         }
 
         setUser(currentUser);
@@ -149,7 +159,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             matchedStaff = { id: sDoc.id, ...sDoc.data() } as StaffProfile;
           }
         } catch (err) {
-          console.error('Error checking staff by email:', err);
+          logAuthFirestoreError('Error checking staff by email:', err, currentUser, activeUid);
         }
       }
 
@@ -162,7 +172,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             matchedStaff = { id: sDoc.id, ...sDoc.data() } as StaffProfile;
           }
         } catch (err) {
-          console.error('Error checking staff by raw email:', err);
+          logAuthFirestoreError('Error checking staff by raw email:', err, currentUser, activeUid);
         }
       }
 
@@ -175,7 +185,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             matchedStaff = { id: sDoc.id, ...sDoc.data() } as StaffProfile;
           }
         } catch (err) {
-          console.error('Error checking staff by userId:', err);
+          logAuthFirestoreError('Error checking staff by userId:', err, currentUser, activeUid);
         }
       }
 
@@ -186,7 +196,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             matchedStaff = { id: sSnap.id, ...sSnap.data() } as StaffProfile;
           }
         } catch (err) {
-          console.error('Error checking staff by staffId:', err);
+          logAuthFirestoreError('Error checking staff by staffId:', err, currentUser, activeUid);
         }
       }
 
@@ -197,7 +207,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             matchedStaff = { id: sSnap.id, ...sSnap.data() } as StaffProfile;
           }
         } catch (err) {
-          console.error('Error checking staff by staffCode:', err);
+          logAuthFirestoreError('Error checking staff by staffCode:', err, currentUser, activeUid);
         }
       }
 
@@ -211,7 +221,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               updatedAt: serverTimestamp(),
             });
           } catch (err) {
-            console.error('Failed to link staff userId:', err);
+            logAuthFirestoreError('Failed to link staff userId:', err, currentUser, activeUid);
           }
         }
 
@@ -230,7 +240,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           await setDoc(userDocRef, verifiedStaffProfile, { merge: true });
         } catch (err) {
-          console.error('Failed to persist user profile in users collection:', err);
+          logAuthFirestoreError('Failed to persist user profile in users collection:', err, currentUser, activeUid);
         }
 
         setUser(currentUser);
@@ -265,7 +275,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               active: false,
             });
           } catch (err) {
-            console.error('Failed to update unauthorized status:', err);
+            logAuthFirestoreError('Failed to update unauthorized status:', err, currentUser, activeUid);
           }
         }
 
@@ -276,7 +286,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLoading(false);
       }
     } catch (error) {
-      console.warn('Notice resolving user profile:', error);
+      logAuthFirestoreError('Notice resolving user profile:', error, currentUser, activeUid);
       if (currentUser && !profile) {
         const fallbackProfile: UserProfile = {
           uid: activeUid,

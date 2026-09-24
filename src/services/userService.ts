@@ -174,8 +174,11 @@ export const getAllUsers = async (): Promise<UserProfile[]> => {
         if (code) staffMap.set(code, d);
         if (email) staffMap.set(email, d);
       });
-    } catch {
-      // Staff collection read failure is non-fatal for user listing
+    } catch (staffErr: any) {
+      console.warn('[userService] staff enrichment read failed; continuing with users collection results:', {
+        code: staffErr?.code || 'unknown',
+        message: staffErr?.message || String(staffErr),
+      });
     }
 
     // Enrich users with staff collection details (e.g. department, staffCode)

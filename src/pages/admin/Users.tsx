@@ -86,17 +86,34 @@ service cloud.firestore {
       );
     }
 
-    // Users Collection - Authenticated institutional accounts can list and view directory
+    function isSelfStaffLink() {
+      return isAuthenticated() &&
+        request.auth.token.email != null &&
+        'email' in resource.data &&
+        resource.data.email == request.auth.token.email &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userId', 'updatedAt']) &&
+        request.resource.data.userId == request.auth.uid;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Users Collection - users manage their own profile; admins may manage the directory
     match /users/{userId} {
-      allow get, list: if isAuthenticated();
-      allow create, update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isOwner(userId) || isAdmin();
       allow delete: if isAdmin();
     }
     
-    // Staff Collection - Authenticated faculty can view directory; Admin/Faculty manage
+    // Staff Collection - authenticated users may be checked against the roster during login;
+    // writes remain limited to admins or the user's own linked staff document.
     match /staff/{staffId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && (isAdmin() || isStaff() || request.auth.uid == staffId);
+      allow create: if isAdmin() || (isAuthenticated() && request.auth.uid == staffId);
+      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == staffId) || isSelfStaffLink();
+      allow delete: if isAdmin();
     }
 
     // Academic & Scheduling Collections - Authenticated users can read and manage schedules

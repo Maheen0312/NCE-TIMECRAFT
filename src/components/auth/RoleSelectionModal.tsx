@@ -22,6 +22,15 @@ import {
   EyeOff
 } from 'lucide-react';
 
+const logFirebaseOperationError = (label: string, err: any, user: { uid: string; email: string | null }) => {
+  console.error(label, {
+    code: err?.code || 'unknown',
+    message: err?.message || String(err),
+    currentUserUid: user.uid,
+    currentUserEmail: user.email,
+  }, err);
+};
+
 type ModalStep = 'SELECT_PORTAL' | 'ADMIN_VERIFY' | 'STAFF_DENIED';
 
 interface RoleSelectionModalProps {
@@ -69,7 +78,7 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({ isOpen }
       const result = await verifyAdminSecretCodeOnServer(adminSecretCode.trim());
 
       if (!result.success) {
-        setAdminError('Invalid Admin Secret Code.');
+        setAdminError(result.message || 'Invalid Admin Secret Code.');
         setIsVerifying(false);
         return;
       }
@@ -88,13 +97,24 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({ isOpen }
         lastLogin: serverTimestamp(),
       };
 
-      await setDoc(doc(db, 'users', user.uid), adminProfile, { merge: true });
+      try {
+        await setDoc(doc(db, 'users', user.uid), adminProfile, { merge: true });
+      } catch (writeErr: any) {
+        logFirebaseOperationError('Admin verification profile write failed:', writeErr, user);
+        if (writeErr?.code === 'permission-denied') {
+          setAdminError('Admin passcode verified, but Firestore blocked your admin profile update. Please publish the updated security rules and try again.');
+        } else {
+          setAdminError(`Admin passcode verified, but profile update failed: ${writeErr?.message || 'Unknown Firestore error.'}`);
+        }
+        return;
+      }
+
       setAuthProfile(adminProfile);
       toast.success('Admin authorization verified. Welcome to Admin Portal!');
       navigate('/admin/dashboard', { replace: true });
     } catch (err: any) {
-      console.error('Error during admin verification:', err);
-      setAdminError('An unexpected error occurred during verification. Please try again.');
+      logFirebaseOperationError('Admin verification failed before profile write:', err, user);
+      setAdminError(err?.message || 'Authentication session failed during admin verification. Please sign in again and retry.');
     } finally {
       setIsVerifying(false);
     }
@@ -109,20 +129,38 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({ isOpen }
       let matchedStaffData: StaffProfile | null = null;
 
       if (userEmail) {
-        const staffQuery = query(collection(db, 'staff'), where('email', '==', userEmail));
-        const snap = await getDocs(staffQuery);
-        if (!snap.empty) {
-          matchedStaffDoc = snap.docs[0];
-          matchedStaffData = { id: matchedStaffDoc.id, ...matchedStaffDoc.data() } as StaffProfile;
+        try {
+          const staffQuery = query(collection(db, 'staff'), where('email', '==', userEmail));
+          const snap = await getDocs(staffQuery);
+          if (!snap.empty) {
+            matchedStaffDoc = snap.docs[0];
+            matchedStaffData = { id: matchedStaffDoc.id, ...matchedStaffDoc.data() } as StaffProfile;
+          }
+        } catch (err: any) {
+          logFirebaseOperationError('Error checking staff by email:', err, user);
+          if (err?.code === 'permission-denied') {
+            toast.error('Firestore blocked the staff roster lookup. Please check staff read rules.');
+            return;
+          }
+          throw err;
         }
       }
 
       if (!matchedStaffData) {
-        const uidQuery = query(collection(db, 'staff'), where('userId', '==', user.uid));
-        const snap = await getDocs(uidQuery);
-        if (!snap.empty) {
-          matchedStaffDoc = snap.docs[0];
-          matchedStaffData = { id: matchedStaffDoc.id, ...matchedStaffDoc.data() } as StaffProfile;
+        try {
+          const uidQuery = query(collection(db, 'staff'), where('userId', '==', user.uid));
+          const snap = await getDocs(uidQuery);
+          if (!snap.empty) {
+            matchedStaffDoc = snap.docs[0];
+            matchedStaffData = { id: matchedStaffDoc.id, ...matchedStaffDoc.data() } as StaffProfile;
+          }
+        } catch (err: any) {
+          logFirebaseOperationError('Error checking staff by userId:', err, user);
+          if (err?.code === 'permission-denied') {
+            toast.error('Firestore blocked the staff roster lookup. Please check staff read rules.');
+            return;
+          }
+          throw err;
         }
       }
 
@@ -172,9 +210,9 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({ isOpen }
 
         setStep('STAFF_DENIED');
       }
-    } catch (err) {
-      console.error('Error verifying staff authorization:', err);
-      toast.error('Failed to verify staff registry. Please try again.');
+    } catch (err: any) {
+      logFirebaseOperationError('Error verifying staff authorization:', err, user);
+      toast.error(err?.message || 'Failed to verify staff registry. Please try again.');
     } finally {
       setIsCheckingStaff(false);
     }
