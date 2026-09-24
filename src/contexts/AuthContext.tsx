@@ -8,13 +8,13 @@ import { db } from '@/firebase/firestore';
 import { StaffProfile } from '@/types/timetable';
 
 const logAuthFirestoreError = (label: string, err: any, currentUser: User | null, targetUid?: string | null) => {
-  console.error(label, {
+  console.warn(label, {
     code: err?.code || 'unknown',
     message: err?.message || String(err),
     currentUserUid: currentUser?.uid || null,
     currentUserEmail: currentUser?.email || null,
     targetUid: targetUid || currentUser?.uid || null,
-  }, err);
+  });
 };
 
 interface AuthContextType {
@@ -108,6 +108,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const normalizedEmail = (currentUser.email || existingData?.email || '').toLowerCase().trim();
 
+      // If Firestore profile was not retrieved, consult authoritative server profile directory
+      if (!existingData && (activeUid || normalizedEmail)) {
+        try {
+          const res = await fetch(`/api/auth/profile?uid=${encodeURIComponent(activeUid)}&email=${encodeURIComponent(normalizedEmail)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.profile) {
+              existingData = data.profile as UserProfile;
+            }
+          }
+        } catch (serverErr) {
+          console.warn('Notice querying server profile directory:', serverErr);
+        }
+      }
+
       // 1. Admin Verification - Strictly verified from database or institution admin credentials
       const roleStr = String(existingData?.role || existingData?.Role || existingData?.userRole || '').trim().toLowerCase();
       const isRoleAdmin = roleStr === 'admin' || roleStr === 'administrator';
@@ -115,8 +130,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isRoleAdmin || 
         normalizedEmail === 'admin@nce.edu' ||
         normalizedEmail === 'maheenmohideen@gmail.com' ||
+        normalizedEmail === 'synedcdev@gmail.com' ||
         currentUser.email?.toLowerCase().trim() === 'admin@nce.edu' ||
-        currentUser.email?.toLowerCase().trim() === 'maheenmohideen@gmail.com';
+        currentUser.email?.toLowerCase().trim() === 'maheenmohideen@gmail.com' ||
+        currentUser.email?.toLowerCase().trim() === 'synedcdev@gmail.com';
 
       if (isUserAdmin) {
         const adminProfile: UserProfile = {
@@ -136,6 +153,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await setDoc(userDocRef, adminProfile, { merge: true });
         } catch (err) {
           logAuthFirestoreError('Failed to persist admin profile in Firestore users collection:', err, currentUser, activeUid);
+        }
+
+        // Synchronize with server-side authoritative directory
+        try {
+          await fetch('/api/admin/users/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(adminProfile),
+          });
+        } catch {
+          // ignore
         }
 
         setUser(currentUser);

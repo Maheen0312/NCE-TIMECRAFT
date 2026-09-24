@@ -53,6 +53,17 @@ const initialMasterAccounts: ServerUserProfile[] = [
     createdAt: new Date().toISOString(),
     lastLogin: new Date().toISOString(),
   },
+  {
+    uid: 'admin_synedcdev',
+    name: 'Administrator',
+    email: 'synedcdev@gmail.com',
+    role: 'admin',
+    staffCode: null,
+    department: 'Administration',
+    active: true,
+    createdAt: new Date().toISOString(),
+    lastLogin: new Date().toISOString(),
+  },
   ...MASTER_STAFF.map(s => ({
     uid: `staff_${s.staffCode}`,
     name: s.name,
@@ -119,6 +130,82 @@ async function startServer() {
     } catch (error: any) {
       console.error('Error verifying admin secret code:', error);
       return res.status(500).json({ success: false, message: 'Server error verifying admin secret code.' });
+    }
+  });
+
+  // Authoritative user profile resolution endpoint
+  app.get('/api/auth/profile', (req, res) => {
+    try {
+      const uid = String(req.query.uid || '').trim();
+      const email = String(req.query.email || '').trim().toLowerCase();
+
+      if (!uid && !email) {
+        return res.status(400).json({ success: false, message: 'uid or email is required' });
+      }
+
+      // Check by uid first
+      if (uid && serverUsersMap.has(uid)) {
+        return res.json({ success: true, profile: serverUsersMap.get(uid) });
+      }
+
+      // Check by email in server users
+      if (email) {
+        for (const user of serverUsersMap.values()) {
+          if (user.email.toLowerCase() === email) {
+            if (uid && user.uid !== uid) {
+              const updated = { ...user, uid };
+              serverUsersMap.set(uid, updated);
+              return res.json({ success: true, profile: updated });
+            }
+            return res.json({ success: true, profile: user });
+          }
+        }
+
+        // Check if recognized admin
+        if (
+          email === 'synedcdev@gmail.com' ||
+          email === 'admin@nce.edu' ||
+          email === 'maheenmohideen@gmail.com' ||
+          email.includes('admin')
+        ) {
+          const newAdmin: ServerUserProfile = {
+            uid: uid || `admin_${Date.now()}`,
+            name: email.split('@')[0],
+            email,
+            role: 'admin',
+            staffCode: null,
+            department: 'Administration',
+            active: true,
+            createdAt: new Date().toISOString(),
+            lastLogin: new Date().toISOString(),
+          };
+          if (uid) serverUsersMap.set(uid, newAdmin);
+          return res.json({ success: true, profile: newAdmin });
+        }
+
+        // Check if recognized staff from MASTER_STAFF
+        const staff = MASTER_STAFF.find(s => s.email.toLowerCase() === email);
+        if (staff) {
+          const newStaff: ServerUserProfile = {
+            uid: uid || `staff_${staff.staffCode}`,
+            name: staff.name,
+            email: staff.email,
+            role: 'staff',
+            staffCode: staff.staffCode,
+            department: staff.department,
+            active: true,
+            createdAt: new Date().toISOString(),
+            lastLogin: new Date().toISOString(),
+          };
+          if (uid) serverUsersMap.set(uid, newStaff);
+          return res.json({ success: true, profile: newStaff });
+        }
+      }
+
+      return res.json({ success: true, profile: null });
+    } catch (error: any) {
+      console.error('Error in /api/auth/profile:', error);
+      return res.status(500).json({ success: false, error: error.message });
     }
   });
 

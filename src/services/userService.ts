@@ -42,6 +42,17 @@ const defaultMasterUsers: UserProfile[] = [
     createdAt: new Date().toISOString(),
     lastLogin: new Date().toISOString(),
   },
+  {
+    uid: 'admin_synedcdev',
+    name: 'Administrator',
+    email: 'synedcdev@gmail.com',
+    role: 'admin',
+    staffCode: null,
+    department: 'Administration',
+    active: true,
+    createdAt: new Date().toISOString(),
+    lastLogin: new Date().toISOString(),
+  },
   ...MASTER_STAFF.map(s => ({
     uid: `staff_${s.staffCode}`,
     name: s.name,

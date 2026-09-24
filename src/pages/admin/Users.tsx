@@ -54,6 +54,7 @@ service cloud.firestore {
         (
           request.auth.token.email == 'admin@nce.edu' ||
           request.auth.token.email == 'maheenmohideen@gmail.com' ||
+          request.auth.token.email == 'synedcdev@gmail.com' ||
           request.auth.token.email.matches('.*admin.*@.*') ||
           request.auth.token.email.matches('.*@nce\\\\.edu')
         );

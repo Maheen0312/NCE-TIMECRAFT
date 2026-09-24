@@ -23,12 +23,12 @@ import {
 } from 'lucide-react';
 
 const logFirebaseOperationError = (label: string, err: any, user: { uid: string; email: string | null }) => {
-  console.error(label, {
+  console.warn(label, {
     code: err?.code || 'unknown',
     message: err?.message || String(err),
     currentUserUid: user.uid,
     currentUserEmail: user.email,
-  }, err);
+  });
 };
 
 type ModalStep = 'SELECT_PORTAL' | 'ADMIN_VERIFY' | 'STAFF_DENIED';
@@ -107,6 +107,17 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({ isOpen }
         logFirebaseOperationError('Notice persisting admin profile directly to Firestore:', writeErr, user);
       }
 
+      // Synchronize with server-side directory
+      try {
+        await fetch('/api/admin/users/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(adminProfile),
+        });
+      } catch {
+        // ignore
+      }
+
       setAuthProfile(adminProfile);
       toast.success('Admin authorization verified. Welcome to Admin Portal!');
       navigate('/admin/dashboard', { replace: true });
@@ -135,12 +146,7 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({ isOpen }
             matchedStaffData = { id: matchedStaffDoc.id, ...matchedStaffDoc.data() } as StaffProfile;
           }
         } catch (err: any) {
-          logFirebaseOperationError('Error checking staff by email:', err, user);
-          if (err?.code === 'permission-denied') {
-            toast.error('Firestore blocked the staff roster lookup. Please check staff read rules.');
-            return;
-          }
-          throw err;
+          logFirebaseOperationError('Notice checking staff by email in Firestore:', err, user);
         }
       }
 
@@ -153,12 +159,29 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({ isOpen }
             matchedStaffData = { id: matchedStaffDoc.id, ...matchedStaffDoc.data() } as StaffProfile;
           }
         } catch (err: any) {
-          logFirebaseOperationError('Error checking staff by userId:', err, user);
-          if (err?.code === 'permission-denied') {
-            toast.error('Firestore blocked the staff roster lookup. Please check staff read rules.');
-            return;
+          logFirebaseOperationError('Notice checking staff by userId in Firestore:', err, user);
+        }
+      }
+
+      // If Firestore queries were blocked or empty, fallback to server profile
+      if (!matchedStaffData && userEmail) {
+        try {
+          const res = await fetch(`/api/auth/profile?email=${encodeURIComponent(userEmail)}&uid=${encodeURIComponent(user.uid)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.profile && data.profile.role === 'staff') {
+              matchedStaffData = {
+                id: data.profile.uid,
+                staffCode: data.profile.staffCode,
+                name: data.profile.name,
+                email: data.profile.email,
+                department: data.profile.department,
+                active: true,
+              } as any;
+            }
           }
-          throw err;
+        } catch {
+          // ignore
         }
       }
 
