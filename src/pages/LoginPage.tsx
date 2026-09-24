@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { motion } from 'framer-motion';
@@ -12,7 +12,8 @@ import { RoleSelectionModal } from '@/components/auth/RoleSelectionModal';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { isAuthenticated, isAdmin, isStaff, loading, setAuthProfile, user, profile } = useAuth();
+  const location = useLocation();
+  const { isAuthenticated, isAdmin, isStaff, loading, setAuthProfile, user, profile, accessRevokedMessage } = useAuth();
   
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
@@ -28,6 +29,13 @@ export default function LoginPage() {
   const [copiedDomain, setCopiedDomain] = useState(false);
   const [mode, setMode] = useState<'login' | 'reset' | 'setup'>('login');
   
+  useEffect(() => {
+    const passedError = (location.state as any)?.error || accessRevokedMessage;
+    if (passedError) {
+      setErrorMsg(passedError);
+    }
+  }, [location.state, accessRevokedMessage]);
+
   useEffect(() => {
     if (!loading) {
       if (isAuthenticated) {

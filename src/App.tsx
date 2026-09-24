@@ -19,6 +19,7 @@ import AdminLayout from '@/layouts/AdminLayout';
 import StaffLayout from '@/layouts/StaffLayout';
 import { AdminRoute } from '@/components/auth/AdminRoute';
 import { StaffRoute } from '@/components/auth/StaffRoute';
+import { DirectRouteRedirect } from '@/components/auth/DirectRouteRedirect';
 
 // Admin Pages
 import AdminDashboard from '@/pages/admin/Dashboard';
@@ -58,6 +59,23 @@ export default function App() {
               <Route path="/" element={<LandingPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/access-denied" element={<AccessDeniedPage />} />
+
+              {/* Direct Protected Routes (Protected by Centralized Session Guard) */}
+              <Route path="/dashboard" element={<DirectRouteRedirect adminTarget="/admin/dashboard" staffTarget="/staff/dashboard" />} />
+              <Route path="/timetable" element={<DirectRouteRedirect adminTarget="/admin/timetable" staffTarget="/staff/timetable" />} />
+              <Route path="/generate" element={<DirectRouteRedirect adminTarget="/admin/generate" requiredRole="admin" />} />
+              <Route path="/staff" element={<DirectRouteRedirect adminTarget="/admin/staff" requiredRole="admin" />} />
+              <Route path="/subjects" element={<DirectRouteRedirect adminTarget="/admin/subjects" staffTarget="/staff/subjects" />} />
+              <Route path="/labs" element={<DirectRouteRedirect adminTarget="/admin/labs" requiredRole="admin" />} />
+              <Route path="/rooms" element={<DirectRouteRedirect adminTarget="/admin/rooms" requiredRole="admin" />} />
+              <Route path="/time-slots" element={<DirectRouteRedirect adminTarget="/admin/time-slots" requiredRole="admin" />} />
+              <Route path="/scheduling-rules" element={<DirectRouteRedirect adminTarget="/admin/rules" requiredRole="admin" />} />
+              <Route path="/rules" element={<DirectRouteRedirect adminTarget="/admin/rules" requiredRole="admin" />} />
+              <Route path="/special-sessions" element={<DirectRouteRedirect adminTarget="/admin/special-sessions" requiredRole="admin" />} />
+              <Route path="/notifications" element={<DirectRouteRedirect adminTarget="/admin/notifications" staffTarget="/staff/notifications" />} />
+              <Route path="/history" element={<DirectRouteRedirect adminTarget="/admin/history" requiredRole="admin" />} />
+              <Route path="/users" element={<DirectRouteRedirect adminTarget="/admin/users" requiredRole="admin" />} />
+              <Route path="/settings" element={<DirectRouteRedirect adminTarget="/admin/settings" requiredRole="admin" />} />
 
               {/* Admin Routes */}
               <Route path="/admin" element={<AdminRoute />}>

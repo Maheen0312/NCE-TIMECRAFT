@@ -14,6 +14,7 @@ import {
 import { db } from '@/firebase/firestore';
 import { StaffProfile } from '@/types/timetable';
 import { MASTER_STAFF } from '@/config/timetableConfig';
+import { waitForAuth } from '@/firebase/auth';
 
 export type { StaffProfile };
 
@@ -31,6 +32,7 @@ const defaultMasterStaff: StaffProfile[] = MASTER_STAFF.map(s => ({
 }));
 
 export const getAllStaff = async (): Promise<StaffProfile[]> => {
+  await waitForAuth();
   try {
     const staffRef = collection(db, STAFF_COLLECTION);
     const q = query(staffRef);
@@ -75,9 +77,9 @@ export const getAllStaff = async (): Promise<StaffProfile[]> => {
       }
     }
     return uniqueStaff.length > 0 ? uniqueStaff : defaultMasterStaff;
-  } catch (error) {
-    console.warn('Notice fetching staff list from Firestore, falling back to master staff configuration:', error);
-    return defaultMasterStaff;
+  } catch (error: any) {
+    console.error('[staffService] Error fetching staff from Firestore:', error);
+    throw error;
   }
 };
 

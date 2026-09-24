@@ -73,10 +73,10 @@ export const MASTER_THEORY_SUBJECTS: MasterSubjectConfig[] = [
   { subjectCode: 'MX3084', subjectName: 'Disaster Management', type: 'THEORY', weeklyHours: 2, assignedStaffCode: 'MSM', department: 'Computer Science & Engineering', year: 'III', semester: '5' },
 
   // --- FINAL YEAR / YEAR IV (Semester 7) Subjects ---
-  { subjectCode: 'GE3791', subjectName: 'Human Values and Ethics', type: 'THEORY', weeklyHours: 2, assignedStaffCode: 'AS', department: 'Computer Science & Engineering', year: 'IV', semester: '7' },
-  { subjectCode: 'GE3752', subjectName: 'Total Quality Management', type: 'THEORY', weeklyHours: 4, assignedStaffCode: 'JT', department: 'Computer Science & Engineering', year: 'IV', semester: '7' },
-  { subjectCode: 'FD352', subjectName: 'Traditional Indian Foods', type: 'THEORY', weeklyHours: 3, assignedStaffCode: 'MM', department: 'Computer Science & Engineering', year: 'IV', semester: '7' },
-  { subjectCode: 'AI3021', subjectName: 'IT in Agriculture', type: 'THEORY', weeklyHours: 3, assignedStaffCode: 'SSS', department: 'Computer Science & Engineering', year: 'IV', semester: '7' },
+  { subjectCode: 'GE3791', subjectName: 'Human Values and Ethics', type: 'THEORY', weeklyHours: 5, assignedStaffCode: 'AS', department: 'Computer Science & Engineering', year: 'IV', semester: '7' },
+  { subjectCode: 'GE3752', subjectName: 'Total Quality Management', type: 'THEORY', weeklyHours: 5, assignedStaffCode: 'JT', department: 'Computer Science & Engineering', year: 'IV', semester: '7' },
+  { subjectCode: 'FD352', subjectName: 'Traditional Indian Foods', type: 'THEORY', weeklyHours: 5, assignedStaffCode: 'MM', department: 'Computer Science & Engineering', year: 'IV', semester: '7' },
+  { subjectCode: 'AI3021', subjectName: 'IT in Agriculture', type: 'THEORY', weeklyHours: 5, assignedStaffCode: 'SSS', department: 'Computer Science & Engineering', year: 'IV', semester: '7' },
 ];
 
 export const MASTER_LABS: MasterLabConfig[] = [

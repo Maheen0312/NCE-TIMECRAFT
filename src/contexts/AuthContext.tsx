@@ -3,9 +3,11 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from '@/firebase/auth';
 import { UserProfile, updateLastLogin } from '@/services/userService';
 import { logout as authServiceLogout } from '@/services/authService';
-import { doc, setDoc, serverTimestamp, collection, query, where, getDocs, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, collection, query, where, getDocs, updateDoc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/firebase/firestore';
 import { StaffProfile } from '@/types/timetable';
+import { startUserSession, sendHeartbeat, endUserSession } from '@/services/sessionService';
+import { toast } from 'react-hot-toast';
 
 const logAuthFirestoreError = (label: string, err: any, currentUser: User | null, targetUid?: string | null) => {
   console.warn(label, {
@@ -27,9 +29,11 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isAdmin: boolean;
   isStaff: boolean;
+  accessRevokedMessage: string | null;
   setAuthProfile: (profile: UserProfile) => void;
   refreshUserProfile: (targetUid?: string) => Promise<void>;
   logoutUser: () => Promise<void>;
+  clearRevocationMessage: () => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -42,9 +46,11 @@ const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
   isAdmin: false,
   isStaff: false,
+  accessRevokedMessage: null,
   setAuthProfile: () => {},
   refreshUserProfile: async () => {},
   logoutUser: async () => {},
+  clearRevocationMessage: () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -54,13 +60,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [authorizedStaff, setAuthorizedStaff] = useState<StaffProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [accessRevokedMessage, setAccessRevokedMessage] = useState<string | null>(null);
+
+  const clearRevocationMessage = () => setAccessRevokedMessage(null);
 
   const setAuthProfile = (newProfile: UserProfile) => {
     setProfile(newProfile);
     sessionStorage.setItem('nce_active_uid', newProfile.uid);
+    startUserSession({
+      uid: newProfile.uid,
+      email: newProfile.email,
+      name: newProfile.name,
+      role: newProfile.role,
+      staffCode: newProfile.staffCode,
+      department: newProfile.department,
+    }).catch(console.warn);
   };
 
   const logoutUser = async () => {
+    if (user?.uid) {
+      await endUserSession(user.uid);
+    }
     sessionStorage.clear();
     setProfile(null);
     setUser(null);
@@ -123,6 +143,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
+      // Check if user account was deactivated or removed by administrator
+      if (existingData && (existingData.active === false || (existingData as any).accountStatus === 'removed')) {
+        console.warn('[AuthContext] User account is deactivated or removed by administrator:', activeUid);
+        if (activeUid) {
+          await endUserSession(activeUid);
+        }
+        await auth.signOut();
+        sessionStorage.clear();
+        setUser(null);
+        setProfile(null);
+        setAuthorizedStaff(null);
+        const msg = 'Your account access has been removed by the administrator.';
+        setAccessRevokedMessage(msg);
+        toast.error(msg, { id: 'account-revoked-init', duration: 7000 });
+        setLoading(false);
+        return;
+      }
+
       // 1. Admin Verification - Strictly verified from database or institution admin credentials
       const roleStr = String(existingData?.role || existingData?.Role || existingData?.userRole || '').trim().toLowerCase();
       const isRoleAdmin = roleStr === 'admin' || roleStr === 'administrator';
@@ -171,6 +209,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthorizedStaff(null);
         sessionStorage.setItem('nce_active_uid', activeUid);
         updateLastLogin(activeUid).catch(console.warn);
+        startUserSession({
+          uid: activeUid,
+          email: adminProfile.email,
+          name: adminProfile.name,
+          role: 'admin',
+          department: adminProfile.department || 'Administration',
+        }).catch(console.warn);
         setLoading(false);
         return;
       }
@@ -276,6 +321,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthorizedStaff({ ...matchedStaff, userId: activeUid });
         sessionStorage.setItem('nce_active_uid', activeUid);
         updateLastLogin(activeUid).catch(console.error);
+        startUserSession({
+          uid: activeUid,
+          email: verifiedStaffProfile.email,
+          name: verifiedStaffProfile.name,
+          role: 'staff',
+          staffCode: verifiedStaffProfile.staffCode,
+          department: matchedStaff.department || null,
+        }).catch(console.warn);
         setLoading(false);
       } else {
         // Determine if account is actively unrecognized (needs role selection) or explicitly unauthorized
@@ -365,6 +418,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  // Real-time Presence Heartbeat & Admin Revocation Detection
+  useEffect(() => {
+    if (!user?.uid || !profile || profile.active === false) return;
+
+    // Send heartbeat every 35 seconds to maintain active presence
+    const heartbeatTimer = setInterval(() => {
+      if (user?.uid) {
+        sendHeartbeat(user.uid).catch(console.warn);
+      }
+    }, 35000);
+
+    // Initial heartbeat
+    sendHeartbeat(user.uid).catch(console.warn);
+
+    // Clean up session on window close / navigation
+    const handleUnload = () => {
+      if (user?.uid) {
+        endUserSession(user.uid).catch(console.warn);
+      }
+    };
+    window.addEventListener('beforeunload', handleUnload);
+
+    // Real-time authorization listener: if Admin deactivates/removes user, revoke access immediately!
+    const userDocRef = doc(db, 'users', user.uid);
+    const unsubscribeSnapshot = onSnapshot(userDocRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.active === false || (data as any).accountStatus === 'removed' || data.role === 'unauthorized') {
+          console.warn('[AuthContext] Admin revoked account access in real time for user:', user.uid);
+          clearInterval(heartbeatTimer);
+          window.removeEventListener('beforeunload', handleUnload);
+          endUserSession(user.uid).catch(console.warn);
+          await auth.signOut();
+          sessionStorage.clear();
+          setUser(null);
+          setProfile(null);
+          setAuthorizedStaff(null);
+          const msg = 'Your account access has been removed by the administrator.';
+          setAccessRevokedMessage(msg);
+          toast.error(msg, { id: 'account-revoked-live', duration: 7000 });
+        }
+      }
+    }, (err) => {
+      console.warn('Notice in user status listener:', err);
+    });
+
+    return () => {
+      clearInterval(heartbeatTimer);
+      window.removeEventListener('beforeunload', handleUnload);
+      unsubscribeSnapshot();
+    };
+  }, [user?.uid, profile?.active]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-luna-dark-navy flex flex-col items-center justify-center text-white">
@@ -391,9 +497,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated: isAuth,
         isAdmin: isAuth && profile?.role === 'admin',
         isStaff: isAuth && profile?.role === 'staff' && !!authorizedStaff && !!profile?.staffCode,
+        accessRevokedMessage,
         setAuthProfile,
         refreshUserProfile,
         logoutUser,
+        clearRevocationMessage,
       }}
     >
       {children}

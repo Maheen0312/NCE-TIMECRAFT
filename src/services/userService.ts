@@ -254,43 +254,96 @@ export const getAllUsers = async (): Promise<UserProfile[]> => {
   return defaultMasterUsers;
 };
 
-export const deleteUser = async (uid: string): Promise<void> => {
+export const deactivateOrRemoveUser = async (uid: string): Promise<void> => {
+  if (!uid) return;
+
+  // 1. Mark user profile in Firestore as inactive and removed
   try {
-    const docRef = doc(db, 'users', uid);
-    await deleteDoc(docRef);
+    const userDocRef = doc(db, 'users', uid);
+    await setDoc(userDocRef, {
+      active: false,
+      accountStatus: 'removed',
+      role: 'unauthorized',
+      removedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
   } catch (error) {
-    console.warn('Notice deleting user from Firestore, updating server/local cache:', error);
+    console.warn('Notice updating user removal in Firestore:', error);
   }
 
+  // 2. Terminate presence session in userSessions collection
   try {
-    await fetch(`/api/admin/users/${encodeURIComponent(uid)}`, { method: 'DELETE' });
-  } catch {
-    // ignore
-  }
-
-  const localList = getLocalUsers().filter(u => u.uid !== uid);
-  saveLocalUsers(localList);
-};
-
-export const deleteMultipleUsers = async (uids: string[]): Promise<void> => {
-  const uidSet = new Set(uids);
-  try {
-    await Promise.all(uids.map(uid => deleteDoc(doc(db, 'users', uid))));
+    const sessionDocRef = doc(db, 'userSessions', uid);
+    await setDoc(sessionDocRef, {
+      active: false,
+      accountStatus: 'removed',
+      removedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
   } catch (error) {
-    console.warn('Notice deleting users from Firestore, updating server/local cache:', error);
+    console.warn('Notice removing session in Firestore:', error);
   }
 
+  // 3. Notify server-side directory and session registry
   try {
-    await fetch('/api/admin/users/bulk-delete', {
+    await fetch('/api/admin/users/remove', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uids }),
+      body: JSON.stringify({ uid }),
     });
   } catch {
     // ignore
   }
 
-  const localList = getLocalUsers().filter(u => !uidSet.has(u.uid));
+  // 4. Update local cache
+  const localList = getLocalUsers().map(u => {
+    if (u.uid === uid) {
+      return { ...u, active: false, accountStatus: 'removed', role: 'unauthorized' as const };
+    }
+    return u;
+  });
+  saveLocalUsers(localList);
+};
+
+export const deleteUser = async (uid: string): Promise<void> => {
+  await deactivateOrRemoveUser(uid);
+};
+
+export const deleteMultipleUsers = async (uids: string[]): Promise<void> => {
+  await Promise.all(uids.map(uid => deactivateOrRemoveUser(uid)));
+};
+
+export const reactivateUser = async (uid: string, role: 'admin' | 'staff' = 'staff'): Promise<void> => {
+  if (!uid) return;
+
+  try {
+    const userDocRef = doc(db, 'users', uid);
+    await setDoc(userDocRef, {
+      active: true,
+      accountStatus: 'active',
+      role,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (error) {
+    console.warn('Notice reactivating user in Firestore:', error);
+  }
+
+  try {
+    await fetch('/api/admin/users/role', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid, role }),
+    });
+  } catch {
+    // ignore
+  }
+
+  const localList = getLocalUsers().map(u => {
+    if (u.uid === uid) {
+      return { ...u, active: true, accountStatus: 'active', role };
+    }
+    return u;
+  });
   saveLocalUsers(localList);
 };
 

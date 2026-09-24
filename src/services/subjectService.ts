@@ -14,6 +14,7 @@ import {
 import { db } from '@/firebase/firestore';
 import { Subject } from '@/types/timetable';
 import { MASTER_THEORY_SUBJECTS } from '@/config/timetableConfig';
+import { waitForAuth } from '@/firebase/auth';
 
 export type { Subject };
 
@@ -60,6 +61,7 @@ const syncLabEntry = async (subjectData: {
 };
 
 export const getAllSubjects = async (): Promise<Subject[]> => {
+  await waitForAuth();
   try {
     const subjectsRef = collection(db, SUBJECTS_COLLECTION);
     const querySnapshot = await getDocs(subjectsRef);

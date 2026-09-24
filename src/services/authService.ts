@@ -94,6 +94,13 @@ export const login = async (email: string, password: string): Promise<{ profile:
     const userCred = await signInWithEmailAndPassword(auth, normalizedEmail, password);
     sessionStorage.setItem('nce_active_uid', userCred.user.uid);
     const userProfile = await getUserProfile(userCred.user.uid);
+    if (userProfile && (userProfile.active === false || (userProfile as any).accountStatus === 'removed' || userProfile.role === 'unauthorized')) {
+      await firebaseSignOut(auth);
+      sessionStorage.clear();
+      const err: any = new Error('Your account access has been removed by the administrator.');
+      err.code = 'auth/user-disabled';
+      throw err;
+    }
     if (userProfile) {
       return { profile: userProfile, firebaseUser: userCred.user };
     }
@@ -156,8 +163,8 @@ export const login = async (email: string, password: string): Promise<{ profile:
     const userDoc = snap.docs[0];
     const userData = userDoc.data() as UserProfile & { passwordHash?: string };
 
-    if (userData.active === false) {
-      const err: any = new Error('This account has been deactivated. Please contact the administrator.');
+    if (userData.active === false || (userData as any).accountStatus === 'removed' || userData.role === 'unauthorized') {
+      const err: any = new Error('Your account access has been removed by the administrator.');
       err.code = 'auth/user-disabled';
       throw err;
     }

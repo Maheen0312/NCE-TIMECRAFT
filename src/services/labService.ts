@@ -12,6 +12,7 @@ import {
 import { db } from '@/firebase/firestore';
 import { Lab, Subject } from '@/types/timetable';
 import { MASTER_LABS } from '@/config/timetableConfig';
+import { waitForAuth } from '@/firebase/auth';
 
 export type { Lab };
 
@@ -30,6 +31,7 @@ const defaultMasterLabs: Lab[] = MASTER_LABS.map(l => ({
 }));
 
 export const getAllLabs = async (): Promise<Lab[]> => {
+  await waitForAuth();
   try {
     const labsRef = collection(db, LABS_COLLECTION);
     const querySnapshot = await getDocs(labsRef);

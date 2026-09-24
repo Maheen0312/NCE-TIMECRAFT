@@ -69,6 +69,12 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
     
+    // User Sessions & Presence Collection - users heartbeat their own presence; admins manage active roster
+    match /userSessions/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+    
     // Staff Collection - authenticated users may be checked against the roster during login;
     // writes remain limited to admins or the user's own linked staff document.
     match /staff/{staffId} {

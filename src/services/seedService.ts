@@ -15,8 +15,10 @@ import {
   MASTER_ROOMS, 
   NAAN_MUTHALVAN_CONFIG 
 } from '@/config/timetableConfig';
+import { waitForAuth } from '@/firebase/auth';
 
 export const seedInitialDataset = async (force: boolean = false): Promise<{ message: string; seeded: boolean }> => {
+  await waitForAuth();
   try {
     // Check existing data
     const [existingStaff, existingSubjects, existingLabs, existingRooms] = await Promise.all([

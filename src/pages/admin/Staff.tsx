@@ -13,8 +13,10 @@ import { useYearFilter } from '@/contexts/YearFilterContext';
 import { matchYear, CanonicalYear } from '@/utils/yearUtils';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AdminStaff() {
+  const { loading: authLoading, currentUser } = useAuth();
   const [staffList, setStaffList] = useState<StaffProfile[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,8 +79,10 @@ export default function AdminStaff() {
   };
 
   useEffect(() => {
-    fetchStaff();
-  }, []);
+    if (!authLoading && currentUser) {
+      fetchStaff();
+    }
+  }, [authLoading, currentUser]);
 
   const handleOpenAdd = () => {
     setEditingStaff(null);

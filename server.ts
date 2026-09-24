@@ -224,6 +224,108 @@ async function startServer() {
     }
   });
 
+  // Session Registry
+  interface ServerSession {
+    uid: string;
+    email: string;
+    name: string;
+    role: string;
+    staffCode?: string | null;
+    department?: string | null;
+    active: boolean;
+    sessionStartedAt: string;
+    lastSeen: string;
+    updatedAt: string;
+  }
+  const activeSessionsMap = new Map<string, ServerSession>();
+
+  // Sessions endpoints
+  app.post('/api/sessions/start', (req, res) => {
+    try {
+      const session = req.body;
+      if (session && session.uid) {
+        const now = new Date().toISOString();
+        activeSessionsMap.set(session.uid, {
+          uid: session.uid,
+          email: session.email || '',
+          name: session.name || 'User',
+          role: session.role || 'staff',
+          staffCode: session.staffCode || null,
+          department: session.department || null,
+          active: true,
+          sessionStartedAt: session.sessionStartedAt || now,
+          lastSeen: now,
+          updatedAt: now,
+        });
+      }
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/sessions/heartbeat', (req, res) => {
+    try {
+      const { uid } = req.body;
+      if (uid && activeSessionsMap.has(uid)) {
+        const s = activeSessionsMap.get(uid)!;
+        s.active = true;
+        s.lastSeen = new Date().toISOString();
+        s.updatedAt = new Date().toISOString();
+        activeSessionsMap.set(uid, s);
+      }
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/sessions/end', (req, res) => {
+    try {
+      const { uid } = req.body;
+      if (uid) {
+        activeSessionsMap.delete(uid);
+      }
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/sessions/active', (req, res) => {
+    try {
+      const now = Date.now();
+      const threshold = 150 * 1000; // 2.5 minutes
+      const activeList = Array.from(activeSessionsMap.values()).filter(s => {
+        if (!s.active) return false;
+        const lastSeenMs = new Date(s.lastSeen).getTime();
+        return (now - lastSeenMs) < threshold;
+      });
+      return res.json({ success: true, sessions: activeList, count: activeList.length });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/admin/users/remove', (req, res) => {
+    try {
+      const { uid } = req.body;
+      if (uid) {
+        const existing = serverUsersMap.get(uid);
+        if (existing) {
+          existing.active = false;
+          (existing as any).accountStatus = 'removed';
+          existing.role = 'unauthorized';
+          serverUsersMap.set(uid, existing);
+        }
+        activeSessionsMap.delete(uid);
+      }
+      return res.json({ success: true, message: 'User access revoked by administrator.' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   app.post('/api/admin/users/sync', (req, res) => {
     try {
       const profile = req.body;

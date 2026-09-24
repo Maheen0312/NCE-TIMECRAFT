@@ -11,6 +11,7 @@ import {
 import { db } from '@/firebase/firestore';
 import { Room } from '@/types/timetable';
 import { MASTER_ROOMS } from '@/config/timetableConfig';
+import { waitForAuth } from '@/firebase/auth';
 
 export type { Room };
 
@@ -27,6 +28,7 @@ const defaultMasterRooms: Room[] = MASTER_ROOMS.map(r => ({
 }));
 
 export const getAllRooms = async (): Promise<Room[]> => {
+  await waitForAuth();
   try {
     const roomsRef = collection(db, ROOMS_COLLECTION);
     const querySnapshot = await getDocs(roomsRef);

@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/firebase/firestore';
 import { TimeSlot } from '@/types/timetable';
+import { waitForAuth } from '@/firebase/auth';
 
 const SLOTS_COLLECTION = 'timeSlots';
 
@@ -25,6 +26,7 @@ export const defaultMasterTimeSlots: Omit<TimeSlot, 'id'>[] = [
 ];
 
 export const getAllTimeSlots = async (): Promise<TimeSlot[]> => {
+  await waitForAuth();
   try {
     const slotsRef = collection(db, SLOTS_COLLECTION);
     const querySnapshot = await getDocs(slotsRef);
@@ -39,8 +41,8 @@ export const getAllTimeSlots = async (): Promise<TimeSlot[]> => {
     }
 
     return slots.sort((a, b) => a.order - b.order);
-  } catch (error) {
-    console.warn('Notice fetching time slots from Firestore, falling back to master slots template:', error);
+  } catch (error: any) {
+    console.error('[timeSlotService] Error fetching time slots from Firestore:', error);
     return defaultMasterTimeSlots.map((s, idx) => ({ id: `default_${idx}`, ...s }));
   }
 };

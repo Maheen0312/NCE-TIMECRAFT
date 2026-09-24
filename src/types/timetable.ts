@@ -150,9 +150,14 @@ export interface ValidationConflict {
   message: string;
   day?: string;
   slotIndex?: number;
+  periodNumber?: number;
   subjectCode?: string;
+  subjectName?: string;
   staffCode?: string;
   roomNumber?: string;
+  year?: string;
+  problem?: string;
+  reason?: string;
   canAutoFix?: boolean;
 }
 

@@ -132,80 +132,155 @@ export class TimetableValidator {
 
     // FINAL YEAR (IV) RULES:
     if (isFinalYear) {
-      // Rule A: Final Year must NEVER have Naan Muthalvan
+      // 1. Final Year must NEVER have Naan Muthalvan anywhere
       const nmEntriesInFinalYear = entries.filter(e => isNaanMuthalvanEntry(e));
       if (nmEntriesInFinalYear.length > 0) {
-        const desc = 'Hard Constraint Violation: Final Year must NEVER schedule Naan Muthalvan. Naan Muthalvan is reserved for lower years.';
-        conflicts.push(desc);
-        lockedSessionConflicts.push(desc);
-        detailedConflicts.push({
-          type: 'LOCKED_VIOLATION',
-          message: desc,
-          canAutoFix: false,
-        });
-      }
-
-      // Rule B: Final Year Wednesday afternoon (Periods 5, 6, 7 -> slots 6, 7, 8) is strictly Career Guidance / Placement Training / Project Work
-      for (const slotIdx of [6, 7, 8]) {
-        const periodNum = slotIdx === 6 ? 5 : slotIdx === 7 ? 6 : 7;
-        const wedEntry = entries.find(e => e.day === 'Wednesday' && e.slotIndex === slotIdx);
-        if (!isCareerGuidanceEntry(wedEntry)) {
-          const desc = `Hard Constraint Violation: Final Year Wednesday Period ${periodNum} must be strictly reserved for "Career Guidance / Placement Training / Project Work".`;
-          lockedSessionConflicts.push(desc);
+        for (const nmEntry of nmEntriesInFinalYear) {
+          const pNum = nmEntry.slotIndex >= 6 ? nmEntry.slotIndex - 1 : nmEntry.slotIndex >= 3 ? nmEntry.slotIndex : nmEntry.slotIndex + 1;
+          const desc = `Final Year must NEVER schedule Naan Muthalvan. Found ${nmEntry.subjectName || nmEntry.subjectCode} on ${nmEntry.day} Period ${pNum}.`;
           conflicts.push(desc);
+          lockedSessionConflicts.push(desc);
           detailedConflicts.push({
             type: 'LOCKED_VIOLATION',
             message: desc,
-            day: 'Wednesday',
-            slotIndex: slotIdx,
+            year: 'IV',
+            day: nmEntry.day,
+            slotIndex: nmEntry.slotIndex,
+            periodNumber: pNum,
+            subjectCode: nmEntry.subjectCode || 'NM',
+            subjectName: nmEntry.subjectName || 'Naan Muthalvan',
+            problem: 'Naan Muthalvan session found in Final Year schedule',
+            reason: 'Final Year students do not participate in Naan Muthalvan; afternoons are strictly reserved for Career Guidance.',
             canAutoFix: false,
           });
         }
       }
 
-      // Rule C: Final Year has 4 subjects
-      const regularFinalEntries = entries.filter(e => e.type === 'THEORY' || e.type === 'LAB');
-      const allocatedSubjects = new Set(regularFinalEntries.map(e => e.subjectCode).filter(Boolean));
-      if (allocatedSubjects.size > 4) {
-        const desc = `Hard Constraint Violation: Final Year has ONLY 4 allocated subjects. Found ${allocatedSubjects.size} subjects.`;
+      // 2. Exactly 4 Final Year subjects must be configured
+      const finalSubjects = subjects.filter(s => s.type === 'THEORY' && s.active !== false);
+      if (finalSubjects.length !== 4) {
+        const desc = `Final Year requires exactly 4 configured subjects. Found ${finalSubjects.length} subjects.`;
         conflicts.push(desc);
         detailedConflicts.push({
           type: 'LOCKED_VIOLATION',
           message: desc,
+          year: 'IV',
+          problem: `Incorrect subject count (${finalSubjects.length} instead of 4)`,
+          reason: 'Final Year curriculum specifies exactly 4 morning subjects rotated Monday to Friday.',
           canAutoFix: false,
         });
       }
 
-      // Rule D: Final Year must NOT have blank teaching periods during normal teaching hours
-      // Teaching periods: Mon (7), Tue (7), Wed morning (4), Thu (7), Fri (7) = 32 teaching periods total
-      const teachingSlotMatrix: { day: string; slotIndex: number; periodNumber: number }[] = [
-        ...['Monday', 'Tuesday', 'Thursday', 'Friday'].flatMap(day => [
-          { day, slotIndex: 0, periodNumber: 1 },
-          { day, slotIndex: 1, periodNumber: 2 },
-          { day, slotIndex: 3, periodNumber: 3 },
-          { day, slotIndex: 4, periodNumber: 4 },
-          { day, slotIndex: 6, periodNumber: 5 },
-          { day, slotIndex: 7, periodNumber: 6 },
-          { day, slotIndex: 8, periodNumber: 7 },
-        ]),
-        { day: 'Wednesday', slotIndex: 0, periodNumber: 1 },
-        { day: 'Wednesday', slotIndex: 1, periodNumber: 2 },
-        { day: 'Wednesday', slotIndex: 3, periodNumber: 3 },
-        { day: 'Wednesday', slotIndex: 4, periodNumber: 4 },
+      // 3. Monday - Friday Morning Teaching Periods (4 periods each day: slots 0, 1, 3, 4)
+      const morningSlots = [
+        { slotIndex: 0, pNum: 1 },
+        { slotIndex: 1, pNum: 2 },
+        { slotIndex: 3, pNum: 3 },
+        { slotIndex: 4, pNum: 4 },
       ];
+      const workingDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
-      for (const reqSlot of teachingSlotMatrix) {
-        const entry = entries.find(e => e.day === reqSlot.day && e.slotIndex === reqSlot.slotIndex);
-        if (!entry || (entry.type !== 'THEORY' && entry.type !== 'LAB' && entry.type !== 'SPECIAL')) {
-          const desc = `Hard Constraint Violation: Final Year must not have blank teaching periods during normal teaching hours. Missing class on ${reqSlot.day} Period ${reqSlot.periodNumber}.`;
+      // Check each day's morning
+      for (const day of workingDays) {
+        const morningEntriesForDay: TimetableEntry[] = [];
+        const seenSubjectsForDay = new Set<string>();
+
+        for (const ms of morningSlots) {
+          const entry = entries.find(e => e.day === day && e.slotIndex === ms.slotIndex);
+          if (!entry || (entry.type !== 'THEORY' && entry.type !== 'CLASS')) {
+            const desc = `Final Year morning teaching period ${ms.pNum} on ${day} is blank or not a theory subject.`;
+            conflicts.push(desc);
+            detailedConflicts.push({
+              type: 'TIME_CONFLICT',
+              message: desc,
+              year: 'IV',
+              day,
+              slotIndex: ms.slotIndex,
+              periodNumber: ms.pNum,
+              problem: `Blank or missing teaching period on ${day} Period ${ms.pNum}`,
+              reason: 'Every morning period (Periods 1, 2, 3, 4) Monday through Friday must be filled by one of the 4 Final Year subjects.',
+              canAutoFix: true,
+            });
+          } else {
+            morningEntriesForDay.push(entry);
+            const subCode = entry.subjectCode || '';
+            if (seenSubjectsForDay.has(subCode)) {
+              const desc = `Duplicate subject ${subCode} found multiple times on ${day} morning.`;
+              conflicts.push(desc);
+              detailedConflicts.push({
+                type: 'TIME_CONFLICT',
+                message: desc,
+                year: 'IV',
+                day,
+                slotIndex: ms.slotIndex,
+                periodNumber: ms.pNum,
+                subjectCode: subCode,
+                subjectName: entry.subjectName,
+                problem: `Subject ${subCode} repeated on the same day`,
+                reason: 'Each of the 4 Final Year subjects must be taught exactly once per day in the morning.',
+                canAutoFix: true,
+              });
+            } else {
+              seenSubjectsForDay.add(subCode);
+            }
+          }
+        }
+      }
+
+      // 4. Weekly Hours Check: each of the 4 subjects must be scheduled exactly 5 hours across the week
+      for (const subj of finalSubjects) {
+        const count = entries.filter(e => e.subjectCode === subj.subjectCode && (e.type === 'THEORY' || e.type === 'CLASS')).length;
+        if (count !== 5) {
+          const desc = `Subject ${subj.subjectCode} (${subj.subjectName}) has ${count} scheduled hours (expected 5 hours: 1 per day).`;
           conflicts.push(desc);
-          detailedConflicts.push({
-            type: 'TIME_CONFLICT',
-            message: desc,
-            day: reqSlot.day,
-            slotIndex: reqSlot.slotIndex,
-            canAutoFix: false,
+          missingHours.push({
+            subjectCode: subj.subjectCode,
+            subjectName: subj.subjectName,
+            requiredHours: 5,
+            allocatedHours: count,
+            difference: count - 5,
+            staffCode: subj.assignedStaff?.[0],
           });
+          detailedConflicts.push({
+            type: 'WEEKLY_HOURS',
+            message: desc,
+            year: 'IV',
+            subjectCode: subj.subjectCode,
+            subjectName: subj.subjectName,
+            problem: `Weekly hours mismatch (${count} allocated vs 5 required)`,
+            reason: 'Final Year subjects rotate daily across Monday–Friday mornings for 5 hours per week each.',
+            canAutoFix: true,
+          });
+        }
+      }
+
+      // 5. Monday - Friday Afternoon: CAREER GUIDANCE ONLY (Periods 5, 6, 7 -> slots 6, 7, 8)
+      const afternoonSlots = [
+        { slotIndex: 6, pNum: 5 },
+        { slotIndex: 7, pNum: 6 },
+        { slotIndex: 8, pNum: 7 },
+      ];
+      for (const day of workingDays) {
+        for (const as of afternoonSlots) {
+          const entry = entries.find(e => e.day === day && e.slotIndex === as.slotIndex);
+          if (!entry || !isCareerGuidanceEntry(entry)) {
+            const desc = `Final Year ${day} afternoon Period ${as.pNum} must be strictly reserved for Career Guidance. Found ${entry?.subjectName || 'Blank'}.`;
+            conflicts.push(desc);
+            lockedSessionConflicts.push(desc);
+            detailedConflicts.push({
+              type: 'LOCKED_VIOLATION',
+              message: desc,
+              year: 'IV',
+              day,
+              slotIndex: as.slotIndex,
+              periodNumber: as.pNum,
+              subjectCode: entry?.subjectCode || 'CG401',
+              subjectName: entry?.subjectName || 'Career Guidance',
+              problem: `Afternoon Period ${as.pNum} is not Career Guidance`,
+              reason: 'Final Year Monday through Friday afternoon periods are strictly designated for Career Guidance & Placement Training.',
+              canAutoFix: true,
+            });
+          }
         }
       }
     } else if (isThirdYear) {

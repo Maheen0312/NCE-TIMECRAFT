@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/firebase/firestore';
 import { SpecialSession } from '@/types/timetable';
+import { waitForAuth } from '@/firebase/auth';
 
 const SESSIONS_COLLECTION = 'specialSessions';
 
@@ -41,10 +42,10 @@ export const defaultNaanMudhalvan2ndYearSession: SpecialSession = {
   description: 'Tamil Nadu State Skill Initiative - 2nd Year Thursday Afternoon (Periods 5, 6, 7)',
 };
 
-export const defaultCareerGuidanceFinalYearSession: SpecialSession = {
+export const defaultCareerGuidanceFinalYearSessions: SpecialSession[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => ({
   name: 'Career Guidance & Placement Training',
   sessionName: 'Career Guidance & Placement Training',
-  day: 'Wednesday',
+  day,
   period: 'AFTERNOON',
   startPeriod: 5,
   endPeriod: 7,
@@ -53,8 +54,10 @@ export const defaultCareerGuidanceFinalYearSession: SpecialSession = {
   type: 'SPECIAL',
   locked: true,
   active: true,
-  description: 'Final Year Special Session: Career Guidance / Placement Training / Project Work (Periods 5, 6, 7)',
-};
+  description: `Final Year Special Session: Career Guidance & Placement Training (${day} Periods 5, 6, 7)`,
+}));
+
+export const defaultCareerGuidanceFinalYearSession = defaultCareerGuidanceFinalYearSessions[2]; // Wednesday for backward compat
 
 // Backwards-compatible aliases
 export const defaultNaanMudhalvanSession = defaultNaanMudhalvan3rdYearSession;
@@ -64,9 +67,13 @@ export const getAllSpecialSessions = async (): Promise<SpecialSession[]> => {
   const defaultSessions: SpecialSession[] = [
     { id: 'naan_mudhalvan_3rd_year_default', ...defaultNaanMudhalvan3rdYearSession },
     { id: 'naan_mudhalvan_2nd_year_default', ...defaultNaanMudhalvan2ndYearSession },
-    { id: 'career_guidance_final_year_default', ...defaultCareerGuidanceFinalYearSession },
+    ...defaultCareerGuidanceFinalYearSessions.map((s, idx) => ({
+      id: `career_guidance_final_year_${s.day.toLowerCase()}_default`,
+      ...s
+    })),
   ];
 
+  await waitForAuth();
   try {
     const sessionsRef = collection(db, SESSIONS_COLLECTION);
     const querySnapshot = await getDocs(sessionsRef);
@@ -87,11 +94,15 @@ export const getAllSpecialSessions = async (): Promise<SpecialSession[]> => {
     const result = [...sessions];
     if (!hasNM3) result.push({ id: 'naan_mudhalvan_3rd_year_default', ...defaultNaanMudhalvan3rdYearSession });
     if (!hasNM2) result.push({ id: 'naan_mudhalvan_2nd_year_default', ...defaultNaanMudhalvan2ndYearSession });
-    if (!hasCG4) result.push({ id: 'career_guidance_final_year_default', ...defaultCareerGuidanceFinalYearSession });
+    if (!hasCG4) {
+      defaultCareerGuidanceFinalYearSessions.forEach(s => {
+        result.push({ id: `career_guidance_final_year_${s.day.toLowerCase()}_default`, ...s });
+      });
+    }
 
     return result;
-  } catch (error) {
-    console.warn('Notice fetching special sessions from Firestore, falling back to default sessions:', error);
+  } catch (error: any) {
+    console.error('[specialSessionService] Error fetching special sessions from Firestore:', error);
     return defaultSessions;
   }
 };

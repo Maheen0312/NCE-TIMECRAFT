@@ -229,28 +229,32 @@ export class TimetableScheduler {
 
       if (isFinalYear) {
         // FINAL YEAR (IV):
-        // - NEVER schedule Naan Mudhalvan for Final Year.
-        // - Wednesday Afternoon (Period 5, 6, 7: slots 6, 7, 8) is strictly Career Guidance / Placement Training / Project Work.
-        // - Monday PM, Tuesday PM, Thursday PM, Friday PM are NORMAL TEACHING PERIODS for the 4 subjects.
+        // - NEVER schedule Naan Muthalvan for Final Year.
+        // - MONDAY -> FRIDAY AFTERNOON / EVENING: CAREER GUIDANCE ONLY.
+        // - Periods 5, 6, 7 (slots 6, 7, 8) are strictly Career Guidance (Special Session, locked).
         const cgSlots = [
           { slotIndex: 6, startTime: '01:40', endTime: '02:30', p: 5 },
           { slotIndex: 7, startTime: '02:30', endTime: '03:20', p: 6 },
           { slotIndex: 8, startTime: '03:20', endTime: '04:20', p: 7 },
         ];
-        for (const s of cgSlots) {
-          entries.push({
-            id: `entry_final_cg_wed_p${s.p}`,
-            day: 'Wednesday',
-            slotIndex: s.slotIndex,
-            startTime: s.startTime,
-            endTime: s.endTime,
-            subjectCode: 'CG401',
-            subjectName: 'Career Guidance & Placement Training',
-            type: 'SPECIAL',
-            locked: true,
-            source: 'FIXED',
-            notes: 'Final Year Special Session: Career Guidance & Placement Training (Immutable)',
-          });
+        for (const day of WORKING_DAYS) {
+          for (const s of cgSlots) {
+            entries.push({
+              id: `entry_final_cg_${day.toLowerCase()}_p${s.p}`,
+              day,
+              slotIndex: s.slotIndex,
+              startTime: s.startTime,
+              endTime: s.endTime,
+              subjectCode: 'CG401',
+              subjectName: 'Career Guidance & Placement Training',
+              type: 'SPECIAL',
+              locked: true,
+              source: 'FIXED',
+              notes: `Final Year Special Session: Career Guidance & Placement Training (${day} Period ${s.p})`,
+              roomId: defaultRoomId,
+              roomNumber: defaultRoomNumber,
+            });
+          }
         }
       } else if (isThirdYear) {
         // 3RD YEAR (III):
@@ -458,54 +462,76 @@ export class TimetableScheduler {
           subjectOrder.push(final4Subjects[subjectOrder.length % final4Subjects.length]);
         }
 
-        // 32 Teaching Periods Matrix across the 5 working days:
-        // Mon(7), Tue(7), Wed(4), Thu(7), Fri(7) = 32
-        // Sub 0: Mon(2), Tue(2), Wed(1), Thu(2), Fri(1) = 8
-        // Sub 1: Mon(2), Tue(2), Wed(1), Thu(1), Fri(2) = 8
-        // Sub 2: Mon(2), Tue(1), Wed(1), Thu(2), Fri(2) = 8
-        // Sub 3: Mon(1), Tue(2), Wed(1), Thu(2), Fri(2) = 8
-        const daySlotPattern: Record<string, { slots: number[]; subjectSequence: number[] }> = {
-          Monday: {
-            slots: [0, 1, 3, 4, 6, 7, 8],
-            subjectSequence: [0, 1, 2, 3, 0, 1, 2], // 0, 1, 2 appear twice; 3 appears once
-          },
-          Tuesday: {
-            slots: [0, 1, 3, 4, 6, 7, 8],
-            subjectSequence: [3, 0, 1, 2, 3, 0, 1], // 3, 0, 1 appear twice; 2 appears once
-          },
-          Wednesday: {
-            slots: [0, 1, 3, 4],
-            subjectSequence: [2, 3, 0, 1],          // 0, 1, 2, 3 appear once each
-          },
-          Thursday: {
-            slots: [0, 1, 3, 4, 6, 7, 8],
-            subjectSequence: [2, 3, 0, 1, 2, 3, 0], // 2, 3, 0 appear twice; 1 appears once
-          },
-          Friday: {
-            slots: [0, 1, 3, 4, 6, 7, 8],
-            subjectSequence: [1, 2, 3, 0, 1, 2, 3], // 1, 2, 3 appear twice; 0 appears once
-          },
-        };
+        // FINAL YEAR (IV): Morning 4 Teaching Periods (slots 0, 1, 3, 4)
+        // Shuffled / rotated across Monday through Friday.
+        // Each day contains all 4 subjects in the morning with zero duplicates per day.
+        // Weekly hours = 5 hours for each of the 4 subjects.
+        const morningSlotIndices = [0, 1, 3, 4];
+
+        // All 24 permutations of [0, 1, 2, 3]
+        const allPermutations: number[][] = [
+          [0, 1, 2, 3], [0, 2, 3, 1], [0, 3, 1, 2], [1, 0, 3, 2],
+          [1, 2, 0, 3], [1, 3, 2, 0], [2, 0, 1, 3], [2, 1, 3, 0],
+          [2, 3, 0, 1], [3, 0, 2, 1], [3, 1, 0, 2], [3, 2, 1, 0],
+          [0, 1, 3, 2], [0, 3, 2, 1], [1, 0, 2, 3], [1, 2, 3, 0],
+          [2, 0, 3, 1], [2, 1, 0, 3], [3, 0, 1, 2], [3, 2, 0, 1],
+          [0, 2, 1, 3], [1, 3, 0, 2], [2, 3, 1, 0], [3, 1, 2, 0]
+        ];
+
+        // Ensure distinct base rotations for Monday-Friday
+        const baseRotations = [
+          [0, 1, 2, 3],
+          [2, 3, 0, 1],
+          [1, 0, 3, 2],
+          [3, 2, 1, 0],
+          [1, 2, 3, 0]
+        ];
 
         let finalYearTheoryConflict = false;
 
-        for (const day of WORKING_DAYS) {
-          const config = daySlotPattern[day];
-          if (!config) continue;
+        for (let dIdx = 0; dIdx < WORKING_DAYS.length; dIdx++) {
+          const day = WORKING_DAYS[dIdx];
+          const preferredPerm = baseRotations[dIdx % baseRotations.length];
+          
+          // Candidate permutations: start with the rotated preferred permutation, followed by other shuffled permutations
+          const candidatePerms = [
+            preferredPerm,
+            ...this.shuffleArray(allPermutations.filter(p => p !== preferredPerm), attemptRng)
+          ];
 
-          for (let i = 0; i < config.slots.length; i++) {
-            const slotIdx = config.slots[i];
-            const subIdx = config.subjectSequence[i];
+          let chosenPerm: number[] | null = null;
+
+          for (const perm of candidatePerms) {
+            let hasConflict = false;
+            for (let i = 0; i < morningSlotIndices.length; i++) {
+              const slotIdx = morningSlotIndices[i];
+              const subIdx = perm[i];
+              const sub = subjectOrder[subIdx];
+              const staffCode = sub.assignedStaff?.[0] || 'STAFF';
+
+              if (staffCode && externalStaffBusy.has(`${day}_${slotIdx}_${staffCode.toUpperCase()}`)) {
+                hasConflict = true;
+                break;
+              }
+            }
+            if (!hasConflict) {
+              chosenPerm = perm;
+              break;
+            }
+          }
+
+          if (!chosenPerm) {
+            finalYearTheoryConflict = true;
+            break;
+          }
+
+          // Populate the 4 morning teaching periods for this day
+          for (let i = 0; i < morningSlotIndices.length; i++) {
+            const slotIdx = morningSlotIndices[i];
+            const subIdx = chosenPerm[i];
             const sub = subjectOrder[subIdx];
             const staffCode = sub.assignedStaff?.[0] || 'STAFF';
             const staffName = staffLookup.get(staffCode) || getStaffNameByCode(staffCode);
-
-            // Cross-year staff conflict check
-            if (staffCode && externalStaffBusy.has(`${day}_${slotIdx}_${staffCode.toUpperCase()}`)) {
-              finalYearTheoryConflict = true;
-              break;
-            }
-
             const slotDef = MASTER_PERIOD_DEFINITIONS.find(p => p.slotIndex === slotIdx)!;
 
             entries.push({
@@ -526,7 +552,6 @@ export class TimetableScheduler {
               source: 'GENERATED',
             });
           }
-          if (finalYearTheoryConflict) break;
         }
 
         if (finalYearTheoryConflict) {

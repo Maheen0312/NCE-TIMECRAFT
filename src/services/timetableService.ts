@@ -27,6 +27,7 @@ import { ScheduleOptimizer } from '@/scheduler/optimizer';
 import { createVersionSnapshot } from './versionService';
 import { getCurrentEngineeringAcademicYear, resolveTimetableAcademicYear } from '@/utils/dateUtils';
 import { normalizeYear, matchYear, subjectMatchesYearAndSem, formatYearDisplay } from '@/utils/yearUtils';
+import { waitForAuth } from '@/firebase/auth';
 
 const TIMETABLES_COLLECTION = 'timetables';
 const LOCAL_TIMETABLES_KEY = 'nce_master_timetables_cache';
@@ -276,6 +277,7 @@ const enrichTimetableWithStaff = (timetable: Timetable, staffMap: Map<string, st
 };
 
 export const getAllTimetables = async (): Promise<Timetable[]> => {
+  await waitForAuth();
   const localList = getLocalTimetables();
   try {
     const [timetablesSnap, staffList] = await Promise.all([
