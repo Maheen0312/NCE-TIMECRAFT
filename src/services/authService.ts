@@ -20,7 +20,10 @@ export async function hashPassword(password: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-export const verifyAdminSecretCodeOnServer = async (secretCode: string): Promise<{ success: boolean; message?: string }> => {
+export const verifyAdminSecretCodeOnServer = async (
+  secretCode: string,
+  userDetails?: { uid?: string; email?: string; displayName?: string; staffCode?: string }
+): Promise<{ success: boolean; message?: string; adminProfile?: any }> => {
   const normalized = (secretCode || '').trim();
   if (!normalized) {
     return { success: false, message: 'Please enter the Admin Secret Code.' };
@@ -30,7 +33,13 @@ export const verifyAdminSecretCodeOnServer = async (secretCode: string): Promise
     const response = await fetch('/api/auth/verify-admin-code', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ secretCode: normalized }),
+      body: JSON.stringify({
+        secretCode: normalized,
+        uid: userDetails?.uid,
+        email: userDetails?.email,
+        displayName: userDetails?.displayName,
+        staffCode: userDetails?.staffCode,
+      }),
     });
 
     const contentType = response.headers.get('content-type') || '';
@@ -40,7 +49,11 @@ export const verifyAdminSecretCodeOnServer = async (secretCode: string): Promise
 
     const data = await response.json();
     if (response.ok && data?.success) {
-      return { success: true, message: 'Admin Secret Code verified successfully.' };
+      return {
+        success: true,
+        message: 'Admin Secret Code verified successfully.',
+        adminProfile: data.adminProfile,
+      };
     }
 
     return { success: false, message: data?.message || 'Invalid Admin Secret Code.' };

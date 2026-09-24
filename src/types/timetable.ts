@@ -73,10 +73,15 @@ export interface TimeSlot {
 export interface SpecialSession {
   id?: string;
   name: string;
+  sessionName?: string;
   day: 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'ALL';
   period: SpecialPeriodType;
-  type: 'SPECIAL';
+  startPeriod?: number; // e.g. 5
+  endPeriod?: number;   // e.g. 7
+  sessionType?: string; // 'NAAN_MUTHALVAN' | 'CAREER_GUIDANCE' | 'PROJECT_WORK' | 'SEMINAR' | 'SPECIAL'
+  type: 'SPECIAL' | 'LOCKED';
   locked: boolean;
+  active?: boolean;
   department?: string;
   description?: string;
   year?: string; // 'ALL' | 'II' | 'III' | 'IV'

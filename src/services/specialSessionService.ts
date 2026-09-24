@@ -11,29 +11,60 @@ import { SpecialSession } from '@/types/timetable';
 
 const SESSIONS_COLLECTION = 'specialSessions';
 
-export const defaultNaanMudhalvanSession: SpecialSession = {
-  name: 'Naan Mudhalvan',
+export const defaultNaanMudhalvan3rdYearSession: SpecialSession = {
+  name: 'Naan Mudhalvan (3rd Year)',
+  sessionName: 'Naan Mudhalvan',
   day: 'Wednesday',
   period: 'AFTERNOON',
+  startPeriod: 5,
+  endPeriod: 7,
+  sessionType: 'NAAN_MUTHALVAN',
+  year: 'III',
   type: 'SPECIAL',
   locked: true,
-  description: 'Mandatory Tamil Nadu State Skill Initiative - Wednesday Afternoon Locked Session',
+  active: true,
+  description: 'Mandatory Tamil Nadu State Skill Initiative - 3rd Year Wednesday Afternoon (Periods 5, 6, 7)',
 };
 
-export const defaultCareerGuidanceSession: SpecialSession = {
-  name: 'Career Guidance',
-  day: 'ALL',
+export const defaultNaanMudhalvan2ndYearSession: SpecialSession = {
+  name: 'Naan Mudhalvan (2nd Year)',
+  sessionName: 'Naan Mudhalvan',
+  day: 'Thursday',
   period: 'AFTERNOON',
+  startPeriod: 5,
+  endPeriod: 7,
+  sessionType: 'NAAN_MUTHALVAN',
+  year: 'II',
+  type: 'SPECIAL',
+  locked: true,
+  active: true,
+  description: 'Tamil Nadu State Skill Initiative - 2nd Year Thursday Afternoon (Periods 5, 6, 7)',
+};
+
+export const defaultCareerGuidanceFinalYearSession: SpecialSession = {
+  name: 'Career Guidance & Placement Training',
+  sessionName: 'Career Guidance & Placement Training',
+  day: 'Wednesday',
+  period: 'AFTERNOON',
+  startPeriod: 5,
+  endPeriod: 7,
+  sessionType: 'CAREER_GUIDANCE',
   year: 'IV',
   type: 'SPECIAL',
   locked: true,
-  description: 'Final Year Special Session: Career Guidance & Placement Training (Locked Session)',
+  active: true,
+  description: 'Final Year Special Session: Career Guidance / Placement Training / Project Work (Periods 5, 6, 7)',
 };
 
+// Backwards-compatible aliases
+export const defaultNaanMudhalvanSession = defaultNaanMudhalvan3rdYearSession;
+export const defaultCareerGuidanceSession = defaultCareerGuidanceFinalYearSession;
+
 export const getAllSpecialSessions = async (): Promise<SpecialSession[]> => {
-  const defaultSessions = [
-    { id: 'naan_mudhalvan_default', ...defaultNaanMudhalvanSession },
-    { id: 'career_guidance_default', ...defaultCareerGuidanceSession }
+  const defaultSessions: SpecialSession[] = [
+    { id: 'naan_mudhalvan_3rd_year_default', ...defaultNaanMudhalvan3rdYearSession },
+    { id: 'naan_mudhalvan_2nd_year_default', ...defaultNaanMudhalvan2ndYearSession },
+    { id: 'career_guidance_final_year_default', ...defaultCareerGuidanceFinalYearSession },
   ];
 
   try {
@@ -48,12 +79,15 @@ export const getAllSpecialSessions = async (): Promise<SpecialSession[]> => {
       return defaultSessions;
     }
 
-    // Ensure institutional defaults are included if missing
-    const hasNM = sessions.some(s => s.name?.toLowerCase().includes('naan'));
-    const hasCG = sessions.some(s => s.name?.toLowerCase().includes('career'));
+    // Ensure institutional defaults are included if missing for any year
+    const hasNM3 = sessions.some(s => s.year === 'III' && s.name?.toLowerCase().includes('naan'));
+    const hasNM2 = sessions.some(s => s.year === 'II' && s.name?.toLowerCase().includes('naan'));
+    const hasCG4 = sessions.some(s => s.year === 'IV' && (s.name?.toLowerCase().includes('career') || s.name?.toLowerCase().includes('placement')));
+
     const result = [...sessions];
-    if (!hasNM) result.push({ id: 'naan_mudhalvan_default', ...defaultNaanMudhalvanSession });
-    if (!hasCG) result.push({ id: 'career_guidance_default', ...defaultCareerGuidanceSession });
+    if (!hasNM3) result.push({ id: 'naan_mudhalvan_3rd_year_default', ...defaultNaanMudhalvan3rdYearSession });
+    if (!hasNM2) result.push({ id: 'naan_mudhalvan_2nd_year_default', ...defaultNaanMudhalvan2ndYearSession });
+    if (!hasCG4) result.push({ id: 'career_guidance_final_year_default', ...defaultCareerGuidanceFinalYearSession });
 
     return result;
   } catch (error) {

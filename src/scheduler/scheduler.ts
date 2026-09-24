@@ -80,13 +80,21 @@ export class TimetableScheduler {
     }
 
     // 2. Prepare Active Subjects & Labs
-    const isFinalYear = matchYear(input.year, 'IV');
+    const targetYear = input.year || (input.subjects?.find(s => s.year)?.year) || 'III';
+    const isFinalYear = matchYear(targetYear, 'IV');
+    const isThirdYear = matchYear(targetYear, 'III');
+    const isSecondYear = matchYear(targetYear, 'II');
 
     let theorySubjects = input.subjects?.filter(s => s.type === 'THEORY' && s.active !== false) || [];
+    if (input.year) {
+      const yearFiltered = theorySubjects.filter(s => !s.year || matchYear(s.year, input.year));
+      if (yearFiltered.length > 0) {
+        theorySubjects = yearFiltered;
+      }
+    }
+
     if (theorySubjects.length === 0) {
-      const baseTheory = isFinalYear
-        ? MASTER_THEORY_SUBJECTS.filter(s => matchYear(s.year, 'IV'))
-        : MASTER_THEORY_SUBJECTS;
+      const baseTheory = MASTER_THEORY_SUBJECTS.filter(s => !s.year || matchYear(s.year, targetYear));
       theorySubjects = baseTheory.map(s => ({
         id: `sub_${s.subjectCode}`,
         subjectCode: s.subjectCode,
@@ -185,6 +193,7 @@ export class TimetableScheduler {
     let bestEntries: TimetableEntry[] | null = null;
     let bestScore = -10000;
     let bestValidation: any = null;
+    let lastFailureReason = '';
 
     // Available Theory Slot Indices per day: [0, 1, 3, 4, 6] (Period 1, 2, 3, 4, 5)
     const theorySlotIndices = [0, 1, 3, 4, 6];
@@ -212,119 +221,135 @@ export class TimetableScheduler {
         }
       }
 
-      // 2. Flexible Institutional Locked Sessions & Naan Mudhalvan Policy
+      // 2. Year-Specific Institutional Locked Sessions & Naan Mudhalvan Policy
       const hasSpecialSessionsConfig = Array.isArray(input.specialSessions) && input.specialSessions.length > 0;
       const matchingSpecialSessions = hasSpecialSessionsConfig 
         ? input.specialSessions!.filter(s => !s.year || s.year === 'ALL' || matchYear(s.year, input.year))
         : [];
 
-      // Check if Wednesday Afternoon is explicitly locked or unlocked in special sessions for this year
-      const wedSession = matchingSpecialSessions.find(s => s.day === 'Wednesday' && (s.period === 'AFTERNOON' || s.period === 'FULL_DAY'));
-      const isWedLockedInConfig = wedSession 
-        ? wedSession.locked !== false 
-        : (input.rules?.reserveWedAfternoon !== false);
-
-      if (isWedLockedInConfig) {
-        entries.push({
-          id: 'entry_wed_nm_p5',
-          day: 'Wednesday',
-          slotIndex: 6,
-          startTime: '01:40',
-          endTime: '02:30',
-          subjectCode: wedSession?.name ? 'SPECIAL' : NAAN_MUTHALVAN_CONFIG.code,
-          subjectName: wedSession?.name || NAAN_MUTHALVAN_CONFIG.name,
-          type: 'SPECIAL',
-          locked: true,
-          source: 'FIXED',
-          notes: wedSession?.description || 'Tamil Nadu Naan Mudhalvan Initiative (Period 5)',
-        });
-        entries.push({
-          id: 'entry_wed_nm_p6',
-          day: 'Wednesday',
-          slotIndex: 7,
-          startTime: '02:30',
-          endTime: '03:20',
-          subjectCode: wedSession?.name ? 'SPECIAL' : NAAN_MUTHALVAN_CONFIG.code,
-          subjectName: wedSession?.name || NAAN_MUTHALVAN_CONFIG.name,
-          type: 'SPECIAL',
-          locked: true,
-          source: 'FIXED',
-          notes: wedSession?.description || 'Tamil Nadu Naan Mudhalvan Initiative (Period 6)',
-        });
-        entries.push({
-          id: 'entry_wed_nm_p7',
-          day: 'Wednesday',
-          slotIndex: 8,
-          startTime: '03:20',
-          endTime: '04:20',
-          subjectCode: wedSession?.name ? 'SPECIAL' : NAAN_MUTHALVAN_CONFIG.code,
-          subjectName: wedSession?.name || NAAN_MUTHALVAN_CONFIG.name,
-          type: 'SPECIAL',
-          locked: true,
-          source: 'FIXED',
-          notes: wedSession?.description || 'Tamil Nadu Naan Mudhalvan Initiative (Period 7)',
-        });
-      }
-
-      // Additional configured special sessions (year-filtered)
-      if (matchingSpecialSessions.length > 0) {
-        for (const spec of matchingSpecialSessions) {
-          if (spec.day === 'Wednesday' && (spec.period === 'AFTERNOON' || spec.period === 'FULL_DAY') && isWedLockedInConfig) {
-            continue;
-          }
-          if (spec.locked) {
-            const slotsToLock = spec.period === 'MORNING' ? [0, 1, 3, 4] : spec.period === 'AFTERNOON' ? [6, 7, 8] : [0, 1, 3, 4, 6, 7, 8];
-            for (const sIdx of slotsToLock) {
-              const def = MASTER_PERIOD_DEFINITIONS.find(p => p.slotIndex === sIdx);
-              if (def) {
-                entries.push({
-                  id: `entry_spec_${spec.id || spec.day}_${sIdx}`,
-                  day: spec.day,
-                  slotIndex: sIdx,
-                  startTime: def.startTime,
-                  endTime: def.endTime,
-                  subjectCode: 'SPECIAL',
-                  subjectName: spec.name,
-                  type: 'SPECIAL',
-                  locked: true,
-                  source: 'FIXED',
-                  notes: spec.description || spec.name,
-                });
-              }
-            }
-          }
-        }
-      }
-
-      // 2b. Final Year Career Guidance Hard Constraint:
-      // The ENTIRE AFTERNOON must be Career Guidance (locked, immutable).
-      // Preserve existing Wednesday afternoon Naan Muthalvan if configured.
       if (isFinalYear) {
-        for (const d of WORKING_DAYS) {
-          if (d === 'Wednesday' && isWedLockedInConfig) {
-            continue; // Preserve Wednesday afternoon Naan Mudhalvan
-          }
-          const cgSlots = [
+        // FINAL YEAR (IV):
+        // - NEVER schedule Naan Mudhalvan for Final Year.
+        // - Wednesday Afternoon (Period 5, 6, 7: slots 6, 7, 8) is strictly Career Guidance / Placement Training / Project Work.
+        // - Monday PM, Tuesday PM, Thursday PM, Friday PM are NORMAL TEACHING PERIODS for the 4 subjects.
+        const cgSlots = [
+          { slotIndex: 6, startTime: '01:40', endTime: '02:30', p: 5 },
+          { slotIndex: 7, startTime: '02:30', endTime: '03:20', p: 6 },
+          { slotIndex: 8, startTime: '03:20', endTime: '04:20', p: 7 },
+        ];
+        for (const s of cgSlots) {
+          entries.push({
+            id: `entry_final_cg_wed_p${s.p}`,
+            day: 'Wednesday',
+            slotIndex: s.slotIndex,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            subjectCode: 'CG401',
+            subjectName: 'Career Guidance & Placement Training',
+            type: 'SPECIAL',
+            locked: true,
+            source: 'FIXED',
+            notes: 'Final Year Special Session: Career Guidance & Placement Training (Immutable)',
+          });
+        }
+      } else if (isThirdYear) {
+        // 3RD YEAR (III):
+        // - Wednesday Afternoon is locked as Naan Mudhalvan (Periods 5, 6, 7: slots 6, 7, 8)
+        const isWedLockedInConfig = input.rules?.reserveWedAfternoon !== false;
+        if (isWedLockedInConfig) {
+          const nmSlots = [
             { slotIndex: 6, startTime: '01:40', endTime: '02:30', p: 5 },
             { slotIndex: 7, startTime: '02:30', endTime: '03:20', p: 6 },
             { slotIndex: 8, startTime: '03:20', endTime: '04:20', p: 7 },
           ];
-          for (const s of cgSlots) {
-            const alreadyExists = entries.some(e => e.day === d && e.slotIndex === s.slotIndex);
-            if (!alreadyExists) {
-              entries.push({
-                id: `entry_cg_${d.toLowerCase()}_p${s.p}`,
-                day: d,
-                slotIndex: s.slotIndex,
-                startTime: s.startTime,
-                endTime: s.endTime,
-                subjectCode: 'CG401',
-                subjectName: 'Career Guidance',
-                type: 'SPECIAL',
-                locked: true,
-                source: 'FIXED',
-                notes: 'Locked Final Year Special Session: Career Guidance & Placement Training',
-              });
+          for (const s of nmSlots) {
+            entries.push({
+              id: `entry_third_nm_wed_p${s.p}`,
+              day: 'Wednesday',
+              slotIndex: s.slotIndex,
+              startTime: s.startTime,
+              endTime: s.endTime,
+              subjectCode: 'NM-301',
+              subjectName: NAAN_MUTHALVAN_CONFIG.name,
+              type: 'SPECIAL',
+              locked: true,
+              source: 'FIXED',
+              notes: 'Tamil Nadu Naan Mudhalvan Initiative (3rd Year Wednesday Afternoon)',
+            });
+          }
+        }
+      } else if (isSecondYear) {
+        // 2ND YEAR (II):
+        // - Naan Mudhalvan is on configured day (default Thursday PM: slots 6, 7, 8)
+        const custom2ndYearNm = matchingSpecialSessions.find(
+          s => (s.sessionName || s.name || '').toLowerCase().includes('naan') ||
+               (s.sessionName || s.name || '').toLowerCase().includes('mudhalvan')
+        );
+        const nmDay = custom2ndYearNm?.day || 'Thursday';
+        const nmSlots = [
+          { slotIndex: 6, startTime: '01:40', endTime: '02:30', p: 5 },
+          { slotIndex: 7, startTime: '02:30', endTime: '03:20', p: 6 },
+          { slotIndex: 8, startTime: '03:20', endTime: '04:20', p: 7 },
+        ];
+        for (const s of nmSlots) {
+          entries.push({
+            id: `entry_second_nm_${nmDay.toLowerCase()}_p${s.p}`,
+            day: nmDay,
+            slotIndex: s.slotIndex,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            subjectCode: 'NM-201',
+            subjectName: custom2ndYearNm?.name || NAAN_MUTHALVAN_CONFIG.name,
+            type: 'SPECIAL',
+            locked: true,
+            source: 'FIXED',
+            notes: `Tamil Nadu Naan Mudhalvan Initiative (2nd Year ${nmDay} Afternoon)`,
+          });
+        }
+      }
+
+      // Additional custom locked special sessions from configuration
+      if (matchingSpecialSessions.length > 0) {
+        for (const spec of matchingSpecialSessions) {
+          if (isFinalYear && ((spec.sessionName || spec.name || '').toLowerCase().includes('naan') || (spec.sessionName || spec.name || '').toLowerCase().includes('mudhalvan'))) {
+            continue; // Skip any Naan Mudhalvan for Final Year
+          }
+          if (spec.locked) {
+            let slotsToLock: number[] = [];
+            if (spec.startPeriod !== undefined && spec.endPeriod !== undefined) {
+              const startSlot = spec.startPeriod <= 2 ? spec.startPeriod - 1 : spec.startPeriod <= 4 ? spec.startPeriod : spec.startPeriod + 1;
+              const endSlot = spec.endPeriod <= 2 ? spec.endPeriod - 1 : spec.endPeriod <= 4 ? spec.endPeriod : spec.endPeriod + 1;
+              for (let s = startSlot; s <= endSlot; s++) {
+                if (s !== 2 && s !== 5) slotsToLock.push(s);
+              }
+            } else if (spec.period === 'MORNING') {
+              slotsToLock = [0, 1, 3, 4];
+            } else if (spec.period === 'AFTERNOON') {
+              slotsToLock = [6, 7, 8];
+            } else {
+              slotsToLock = [0, 1, 3, 4, 6, 7, 8];
+            }
+
+            for (const sIdx of slotsToLock) {
+              const alreadyExists = entries.some(e => e.day === spec.day && e.slotIndex === sIdx);
+              if (!alreadyExists) {
+                const def = MASTER_PERIOD_DEFINITIONS.find(p => p.slotIndex === sIdx);
+                if (def) {
+                  entries.push({
+                    id: `entry_spec_${spec.id || spec.day}_${sIdx}`,
+                    day: spec.day,
+                    slotIndex: sIdx,
+                    startTime: def.startTime,
+                    endTime: def.endTime,
+                    subjectCode: 'SPECIAL',
+                    subjectName: spec.sessionName || spec.name || 'Special Session',
+                    type: 'SPECIAL',
+                    locked: true,
+                    source: 'FIXED',
+                    notes: spec.description || spec.name,
+                  });
+                }
+              }
             }
           }
         }
@@ -333,9 +358,9 @@ export class TimetableScheduler {
       // 3. Schedule Labs on available days
       const availableLabDays = isFinalYear
         ? [] // No lab allocations for Final Year
-        : isWedLockedInConfig 
-          ? ['Monday', 'Tuesday', 'Thursday', 'Friday']
-          : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+        : isSecondYear
+        ? WORKING_DAYS.filter(d => d !== 'Thursday') // Avoid 2nd Year Naan Mudhalvan day
+        : LAB_AVAILABLE_DAYS; // Mon, Tue, Thu, Fri (Wednesday is Naan Mudhalvan for 3rd Year)
       const shuffledLabDays = this.shuffleArray(availableLabDays, attemptRng);
       const shuffledLabs = this.shuffleArray([...labSubjects], attemptRng);
       const labsToScheduleCount = Math.min(availableLabDays.length, shuffledLabs.length);
@@ -420,245 +445,322 @@ export class TimetableScheduler {
       if (!labAllocationSuccess) continue;
 
       // 4. Theory Scheduling across available slots
-      // Mon-Fri: Standard theory slots [0, 1, 3, 4, 6] (Period 1, 2, 3, 4, 5) = 25 slots
-      // In addition, any non-Wednesday day without a lab has slots [7, 8] available.
-      const dayTheorySlotsMap = new Map<string, number[]>();
-      let totalAvailableTheorySlots = 0;
+      if (isFinalYear) {
+        // FINAL YEAR (IV): Exactly 4 subjects allocated across 32 teaching periods (8 periods each)
+        // Zero blank teaching periods!
+        const final4Subjects = theorySubjects.slice(0, 4);
+        if (final4Subjects.length === 0) continue;
 
-      for (const d of WORKING_DAYS) {
-        if (isFinalYear) {
-          // Final Year subjects MUST appear ONLY in morning periods (slots 0, 1, 3, 4)
-          dayTheorySlotsMap.set(d, [0, 1, 3, 4]);
-          totalAvailableTheorySlots += 4;
-        } else {
+        // Shuffle subject order per attempt for variety
+        const subjectOrder = this.shuffleArray([...final4Subjects], attemptRng);
+        while (subjectOrder.length < 4) {
+          // If fewer than 4 provided in input, pad with available
+          subjectOrder.push(final4Subjects[subjectOrder.length % final4Subjects.length]);
+        }
+
+        // 32 Teaching Periods Matrix across the 5 working days:
+        // Mon(7), Tue(7), Wed(4), Thu(7), Fri(7) = 32
+        // Sub 0: Mon(2), Tue(2), Wed(1), Thu(2), Fri(1) = 8
+        // Sub 1: Mon(2), Tue(2), Wed(1), Thu(1), Fri(2) = 8
+        // Sub 2: Mon(2), Tue(1), Wed(1), Thu(2), Fri(2) = 8
+        // Sub 3: Mon(1), Tue(2), Wed(1), Thu(2), Fri(2) = 8
+        const daySlotPattern: Record<string, { slots: number[]; subjectSequence: number[] }> = {
+          Monday: {
+            slots: [0, 1, 3, 4, 6, 7, 8],
+            subjectSequence: [0, 1, 2, 3, 0, 1, 2], // 0, 1, 2 appear twice; 3 appears once
+          },
+          Tuesday: {
+            slots: [0, 1, 3, 4, 6, 7, 8],
+            subjectSequence: [3, 0, 1, 2, 3, 0, 1], // 3, 0, 1 appear twice; 2 appears once
+          },
+          Wednesday: {
+            slots: [0, 1, 3, 4],
+            subjectSequence: [2, 3, 0, 1],          // 0, 1, 2, 3 appear once each
+          },
+          Thursday: {
+            slots: [0, 1, 3, 4, 6, 7, 8],
+            subjectSequence: [2, 3, 0, 1, 2, 3, 0], // 2, 3, 0 appear twice; 1 appears once
+          },
+          Friday: {
+            slots: [0, 1, 3, 4, 6, 7, 8],
+            subjectSequence: [1, 2, 3, 0, 1, 2, 3], // 1, 2, 3 appear twice; 0 appears once
+          },
+        };
+
+        let finalYearTheoryConflict = false;
+
+        for (const day of WORKING_DAYS) {
+          const config = daySlotPattern[day];
+          if (!config) continue;
+
+          for (let i = 0; i < config.slots.length; i++) {
+            const slotIdx = config.slots[i];
+            const subIdx = config.subjectSequence[i];
+            const sub = subjectOrder[subIdx];
+            const staffCode = sub.assignedStaff?.[0] || 'STAFF';
+            const staffName = staffLookup.get(staffCode) || getStaffNameByCode(staffCode);
+
+            // Cross-year staff conflict check
+            if (staffCode && externalStaffBusy.has(`${day}_${slotIdx}_${staffCode.toUpperCase()}`)) {
+              finalYearTheoryConflict = true;
+              break;
+            }
+
+            const slotDef = MASTER_PERIOD_DEFINITIONS.find(p => p.slotIndex === slotIdx)!;
+
+            entries.push({
+              id: `entry_final_theory_${sub.subjectCode}_${day}_${slotIdx}`,
+              day,
+              slotIndex: slotIdx,
+              startTime: slotDef.startTime,
+              endTime: slotDef.endTime,
+              subjectId: sub.id,
+              subjectCode: sub.subjectCode,
+              subjectName: sub.subjectName,
+              staffCode,
+              staffName,
+              roomId: defaultRoomId,
+              roomNumber: defaultRoomNumber,
+              type: 'THEORY',
+              locked: false,
+              source: 'GENERATED',
+            });
+          }
+          if (finalYearTheoryConflict) break;
+        }
+
+        if (finalYearTheoryConflict) {
+          lastFailureReason = 'Final year theory conflict';
+          continue;
+        }
+      } else {
+        // NON-FINAL-YEAR THEORY SCHEDULING (Year II and Year III)
+        const dayTheorySlotsMap = new Map<string, number[]>();
+        let totalAvailableTheorySlots = 0;
+
+        for (const d of WORKING_DAYS) {
           // Respect institutional lock on Wednesday afternoon or available periods
-          const slotsForDay = (d === 'Wednesday' && isWedLockedInConfig) ? [0, 1, 3, 4] : [0, 1, 3, 4, 6];
-          if ((d !== 'Wednesday' || !isWedLockedInConfig) && !labDaysScheduled.has(d)) {
-            slotsForDay.push(7, 8); // Periods 6 and 7 available if no lab on this day
+          const isWedNmDay = (d === 'Wednesday' && isThirdYear);
+          const isThuNmDay = (d === 'Thursday' && isSecondYear);
+          const slotsForDay = (isWedNmDay || isThuNmDay) ? [0, 1, 3, 4] : [0, 1, 3, 4, 6];
+          if (!isWedNmDay && !isThuNmDay && !labDaysScheduled.has(d)) {
+            slotsForDay.push(7, 8); // Periods 6 and 7 available if no lab or special session
           }
           dayTheorySlotsMap.set(d, slotsForDay);
           totalAvailableTheorySlots += slotsForDay.length;
         }
-      }
 
-      // Calculate initial requested target hours for each theory subject (max 5 days/week per subject)
-      const rawTheoryReqs: { subject: Subject; baseHours: number; staffCode: string; staffName: string }[] = [];
-      for (const sub of theorySubjects) {
-        let baseHours = sub.weeklyHours || 4;
-        if (sub.subjectCode === 'MX3084' || sub.subjectName?.toLowerCase().includes('disaster')) {
-          baseHours = Math.min(2, sub.weeklyHours || 2);
-        } else {
-          baseHours = Math.min(5, Math.max(1, baseHours));
+        // Calculate initial requested target hours for each theory subject (max 5 days/week per subject)
+        const rawTheoryReqs: { subject: Subject; baseHours: number; staffCode: string; staffName: string }[] = [];
+        for (const sub of theorySubjects) {
+          let baseHours = sub.weeklyHours || 4;
+          if (sub.subjectCode === 'MX3084' || sub.subjectName?.toLowerCase().includes('disaster')) {
+            baseHours = Math.min(2, sub.weeklyHours || 2);
+          } else {
+            baseHours = Math.min(5, Math.max(1, baseHours));
+          }
+
+          const staffCode = sub.assignedStaff?.[0] || 'STAFF';
+          const staffName = staffLookup.get(staffCode) || getStaffNameByCode(staffCode);
+          rawTheoryReqs.push({ subject: sub, baseHours, staffCode, staffName });
         }
 
-        const staffCode = sub.assignedStaff?.[0] || 'STAFF';
-        const staffName = staffLookup.get(staffCode) || getStaffNameByCode(staffCode);
-        rawTheoryReqs.push({ subject: sub, baseHours, staffCode, staffName });
-      }
+        // Adjust total target hours to match available theory slots
+        let currentTotalHours = rawTheoryReqs.reduce((sum, r) => sum + r.baseHours, 0);
+        const theoryRequirements = rawTheoryReqs.map(r => ({ ...r, targetHours: r.baseHours }));
 
-      // Adjust total target hours to match available theory slots
-      let currentTotalHours = rawTheoryReqs.reduce((sum, r) => sum + r.baseHours, 0);
-      const theoryRequirements = rawTheoryReqs.map(r => ({ ...r, targetHours: r.baseHours }));
+        while (currentTotalHours > totalAvailableTheorySlots) {
+          const candidates = theoryRequirements.filter(
+            r => r.targetHours > 1 && r.subject.subjectCode !== 'MX3084'
+          );
+          if (candidates.length === 0) break;
+          const chosen = candidates[Math.floor(attemptRng() * candidates.length)];
+          chosen.targetHours -= 1;
+          currentTotalHours -= 1;
+        }
 
-      // If requested hours exceed available slots, reduce by 1 hour from non-MX subjects iteratively
-      while (currentTotalHours > totalAvailableTheorySlots) {
-        const candidates = theoryRequirements.filter(
-          r => r.targetHours > 1 && r.subject.subjectCode !== 'MX3084'
-        );
-        if (candidates.length === 0) break;
-        const chosen = candidates[Math.floor(attemptRng() * candidates.length)];
-        chosen.targetHours -= 1;
-        currentTotalHours -= 1;
-      }
-
-      // Invariant: Since each subject can appear at most ONCE per day,
-      // any subject requiring 5 hours MUST be scheduled on all 5 working days (including Wednesday).
-      // Therefore, the number of subjects with targetHours == 5 cannot exceed the slots available on Wednesday (or min day capacity).
-      const minDayCapacity = Math.min(...WORKING_DAYS.map(d => (dayTheorySlotsMap.get(d) || []).length));
-      let count5HourSubjects = 0;
-      for (const req of theoryRequirements) {
-        if (req.targetHours >= 5) {
-          count5HourSubjects++;
-          if (count5HourSubjects > minDayCapacity) {
-            req.targetHours = Math.max(1, Math.min(4, minDayCapacity));
+        const minDayCapacity = Math.min(...WORKING_DAYS.map(d => (dayTheorySlotsMap.get(d) || []).length));
+        let count5HourSubjects = 0;
+        for (const req of theoryRequirements) {
+          if (req.targetHours >= 5) {
+            count5HourSubjects++;
+            if (count5HourSubjects > minDayCapacity) {
+              req.targetHours = Math.max(1, Math.min(4, minDayCapacity));
+            }
           }
         }
-      }
 
-      // Sort with larger target hours first, shuffled randomly for variety
-      const shuffledTheoryReqs = this.shuffleArray([...theoryRequirements], attemptRng)
-        .sort((a, b) => b.targetHours - a.targetHours);
+        const shuffledTheoryReqs = this.shuffleArray([...theoryRequirements], attemptRng)
+          .sort((a, b) => b.targetHours - a.targetHours);
 
-      // Track occupied slots and staff/subject day positions
-      const occupiedSlots = new Map<string, Set<number>>();
-      const daySubjectMap = new Map<string, Set<string>>();
-      const daySlotStaffMap = new Map<string, Map<number, string>>();
-      const subjectDaySlot = new Map<string, Map<string, number>>();
+        const occupiedSlots = new Map<string, Set<number>>();
+        const daySubjectMap = new Map<string, Set<string>>();
+        const daySlotStaffMap = new Map<string, Map<number, string>>();
+        const subjectDaySlot = new Map<string, Map<string, number>>();
 
-      for (const d of WORKING_DAYS) {
-        occupiedSlots.set(d, new Set<number>());
-        daySubjectMap.set(d, new Set<string>());
-        daySlotStaffMap.set(d, new Map<number, string>());
-      }
-
-      // Mark breaks, labs, and Naan Muthalvan as occupied in grid
-      entries.forEach(e => {
-        occupiedSlots.get(e.day)?.add(e.slotIndex);
-        if (e.staffCode) {
-          daySlotStaffMap.get(e.day)?.set(e.slotIndex, e.staffCode);
-        }
-      });
-
-      let theoryPlacementFailed = false;
-
-      for (const req of shuffledTheoryReqs) {
-        const { subject, targetHours, staffCode, staffName } = req;
-        subjectDaySlot.set(subject.subjectCode, new Map<string, number>());
-
-        // Choose targetHours distinct days out of 5
-        const availableDaysForSubject = WORKING_DAYS.filter(d => {
-          if (daySubjectMap.get(d)?.has(subject.subjectCode)) return false;
-          const dayOccupied = occupiedSlots.get(d)!;
-          const allowedSlotsForDay = dayTheorySlotsMap.get(d) || [];
-          const hasFreeSlot = allowedSlotsForDay.some(sIdx => !dayOccupied.has(sIdx));
-          return hasFreeSlot;
-        });
-
-        if (availableDaysForSubject.length < targetHours) {
-          theoryPlacementFailed = true;
-          break;
+        for (const d of WORKING_DAYS) {
+          occupiedSlots.set(d, new Set<number>());
+          daySubjectMap.set(d, new Set<string>());
+          daySlotStaffMap.set(d, new Map<number, string>());
         }
 
-        // Rank available days by remaining capacity (prefer days with more free slots remaining)
-        // with small random jitter to balance distribution across the week
-        const rankedDays = [...availableDaysForSubject].sort((a, b) => {
-          const freeA = (dayTheorySlotsMap.get(a) || []).filter(s => !occupiedSlots.get(a)!.has(s)).length;
-          const freeB = (dayTheorySlotsMap.get(b) || []).filter(s => !occupiedSlots.get(b)!.has(s)).length;
-          return (freeB - freeA) + (attemptRng() - 0.5) * 0.8;
+        entries.forEach(e => {
+          occupiedSlots.get(e.day)?.add(e.slotIndex);
+          if (e.staffCode) {
+            daySlotStaffMap.get(e.day)?.set(e.slotIndex, e.staffCode);
+          }
         });
 
-        const chosenDays = rankedDays.slice(0, targetHours);
+        let theoryPlacementFailed = false;
 
-        for (const day of chosenDays) {
-          const dayOccupied = occupiedSlots.get(day)!;
-          const allowedSlotsForDay = dayTheorySlotsMap.get(day) || [];
-          const freeSlots = allowedSlotsForDay.filter(sIdx => !dayOccupied.has(sIdx));
+        for (const req of shuffledTheoryReqs) {
+          const { subject, targetHours, staffCode, staffName } = req;
+          subjectDaySlot.set(subject.subjectCode, new Map<string, number>());
 
-          if (freeSlots.length === 0) {
+          const availableDaysForSubject = WORKING_DAYS.filter(d => {
+            if (daySubjectMap.get(d)?.has(subject.subjectCode)) return false;
+            const dayOccupied = occupiedSlots.get(d)!;
+            const allowedSlotsForDay = dayTheorySlotsMap.get(d) || [];
+            const hasFreeSlot = allowedSlotsForDay.some(sIdx => !dayOccupied.has(sIdx));
+            return hasFreeSlot;
+          });
+
+          if (availableDaysForSubject.length < targetHours) {
             theoryPlacementFailed = true;
             break;
           }
 
-          // Anti-Repetition Scoring for slots:
-          const dayIdx = WORKING_DAYS.indexOf(day);
-          const yesterday = dayIdx > 0 ? WORKING_DAYS[dayIdx - 1] : null;
-          const tomorrow = dayIdx < WORKING_DAYS.length - 1 ? WORKING_DAYS[dayIdx + 1] : null;
-          const yesterdaySlot = yesterday ? subjectDaySlot.get(subject.subjectCode)?.get(yesterday) : undefined;
-          const tomorrowSlot = tomorrow ? subjectDaySlot.get(subject.subjectCode)?.get(tomorrow) : undefined;
-
-          // Rank available free slots
-          const scoredSlots = freeSlots.map(sIdx => {
-            let penalty = 0;
-            // Prefer morning slots (0, 1, 3, 4) and Period 5 (6) over late afternoon (7, 8)
-            if (sIdx >= 7) penalty += 35;
-
-            if (yesterdaySlot !== undefined && yesterdaySlot === sIdx) penalty += 50;
-            if (tomorrowSlot !== undefined && tomorrowSlot === sIdx) penalty += 50;
-
-            // Global Cross-Year Staff Conflict Avoidance:
-            if (staffCode && externalStaffBusy.has(`${day}_${sIdx}_${staffCode.toUpperCase()}`)) {
-              penalty += 5000;
-            }
-
-            // Global Cross-Year Classroom Conflict Avoidance:
-            if (externalRoomBusy.has(`${day}_${sIdx}_${defaultRoomId.toUpperCase()}`) || 
-                externalRoomBusy.has(`${day}_${sIdx}_${defaultRoomNumber.toUpperCase()}`)) {
-              penalty += 5000;
-            }
-
-            penalty += attemptRng() * 5;
-            return { slotIndex: sIdx, penalty };
+          const rankedDays = [...availableDaysForSubject].sort((a, b) => {
+            const freeA = (dayTheorySlotsMap.get(a) || []).filter(s => !occupiedSlots.get(a)!.has(s)).length;
+            const freeB = (dayTheorySlotsMap.get(b) || []).filter(s => !occupiedSlots.get(b)!.has(s)).length;
+            return (freeB - freeA) + (attemptRng() - 0.5) * 0.8;
           });
 
-          scoredSlots.sort((a, b) => a.penalty - b.penalty);
-          // Zero-tolerance for staff conflicts across years: fail attempt if conflict exists
-          if (scoredSlots[0].penalty >= 5000) {
-            theoryPlacementFailed = true;
-            break;
-          }
-          const bestSlotChoice = scoredSlots[0].slotIndex;
+          const chosenDays = rankedDays.slice(0, targetHours);
 
-          const slotDef = MASTER_PERIOD_DEFINITIONS.find(p => p.slotIndex === bestSlotChoice)!;
+          for (const day of chosenDays) {
+            const dayOccupied = occupiedSlots.get(day)!;
+            const allowedSlotsForDay = dayTheorySlotsMap.get(day) || [];
+            const freeSlots = allowedSlotsForDay.filter(sIdx => !dayOccupied.has(sIdx));
 
-          entries.push({
-            id: `entry_theory_${subject.subjectCode}_${day}_${bestSlotChoice}`,
-            day,
-            slotIndex: bestSlotChoice,
-            startTime: slotDef.startTime,
-            endTime: slotDef.endTime,
-            subjectId: subject.id,
-            subjectCode: subject.subjectCode,
-            subjectName: subject.subjectName,
-            staffCode,
-            staffName,
-            roomId: defaultRoomId,
-            roomNumber: defaultRoomNumber,
-            type: 'THEORY',
-            locked: false,
-            source: 'GENERATED',
-          });
+            if (freeSlots.length === 0) {
+              theoryPlacementFailed = true;
+              break;
+            }
 
-          occupiedSlots.get(day)!.add(bestSlotChoice);
-          daySubjectMap.get(day)!.add(subject.subjectCode);
-          daySlotStaffMap.get(day)!.set(bestSlotChoice, staffCode);
-          subjectDaySlot.get(subject.subjectCode)!.set(day, bestSlotChoice);
-        }
+            const dayIdx = WORKING_DAYS.indexOf(day);
+            const yesterday = dayIdx > 0 ? WORKING_DAYS[dayIdx - 1] : null;
+            const tomorrow = dayIdx < WORKING_DAYS.length - 1 ? WORKING_DAYS[dayIdx + 1] : null;
+            const yesterdaySlot = yesterday ? subjectDaySlot.get(subject.subjectCode)?.get(yesterday) : undefined;
+            const tomorrowSlot = tomorrow ? subjectDaySlot.get(subject.subjectCode)?.get(tomorrow) : undefined;
 
-        if (theoryPlacementFailed) break;
-      }
+            const scoredSlots = freeSlots.map(sIdx => {
+              let penalty = 0;
+              if (sIdx >= 7) penalty += 35;
+              if (yesterdaySlot !== undefined && yesterdaySlot === sIdx) penalty += 50;
+              if (tomorrowSlot !== undefined && tomorrowSlot === sIdx) penalty += 50;
 
-      if (theoryPlacementFailed) continue;
+              if (staffCode && externalStaffBusy.has(`${day}_${sIdx}_${staffCode.toUpperCase()}`)) {
+                penalty += 5000;
+              }
+              if (externalRoomBusy.has(`${day}_${sIdx}_${defaultRoomId.toUpperCase()}`) || 
+                  externalRoomBusy.has(`${day}_${sIdx}_${defaultRoomNumber.toUpperCase()}`)) {
+                penalty += 5000;
+              }
+              penalty += attemptRng() * 5;
+              return { slotIndex: sIdx, penalty };
+            });
 
-      // 5. Fill remaining unassigned non-lab afternoon slots (Periods 6 & 7) with Institutional Enrichment Activities
-      const nonLabAfternoons = ['Monday', 'Tuesday', 'Thursday', 'Friday'].filter(d => !labDaysScheduled.has(d));
-      const enrichmentActivities = [
-        { code: 'LIB', name: 'Library & Information Research', notes: 'Digital Library & Research Reading' },
-        { code: 'SEM', name: 'Technical Seminar & Presentation', notes: 'Student Technical Presentations & Soft Skills' },
-        { code: 'MENTOR', name: 'Mentoring & Career Advisory', notes: 'Faculty Mentorship & Career Guidance' },
-        { code: 'TUT', name: 'Tutorial & Practice Hour', notes: 'Analytical Problem Solving & Practice' },
-      ];
+            scoredSlots.sort((a, b) => a.penalty - b.penalty);
+            if (scoredSlots[0].penalty >= 5000) {
+              theoryPlacementFailed = true;
+              break;
+            }
+            const bestSlotChoice = scoredSlots[0].slotIndex;
+            const slotDef = MASTER_PERIOD_DEFINITIONS.find(p => p.slotIndex === bestSlotChoice)!;
 
-      let actIdx = 0;
-      for (const d of nonLabAfternoons) {
-        const dOcc = occupiedSlots.get(d)!;
-        if (!dOcc.has(7) && !dOcc.has(8)) {
-          const act = enrichmentActivities[actIdx % enrichmentActivities.length];
-          actIdx++;
-          for (const sIdx of [7, 8]) {
-            const def = MASTER_PERIOD_DEFINITIONS.find(p => p.slotIndex === sIdx);
             entries.push({
-              id: `entry_enrich_${d}_${sIdx}`,
-              day: d,
-              slotIndex: sIdx,
-              startTime: def?.startTime || (sIdx === 7 ? '02:30' : '03:20'),
-              endTime: def?.endTime || (sIdx === 7 ? '03:20' : '04:20'),
-              subjectCode: act.code,
-              subjectName: act.name,
-              type: 'SPECIAL',
-              locked: false,
-              source: 'GENERATED',
+              id: `entry_theory_${subject.subjectCode}_${day}_${bestSlotChoice}`,
+              day,
+              slotIndex: bestSlotChoice,
+              startTime: slotDef.startTime,
+              endTime: slotDef.endTime,
+              subjectId: subject.id,
+              subjectCode: subject.subjectCode,
+              subjectName: subject.subjectName,
+              staffCode,
+              staffName,
               roomId: defaultRoomId,
               roomNumber: defaultRoomNumber,
-              notes: `${act.notes} (Period ${sIdx === 7 ? '6' : '7'})`,
+              type: 'THEORY',
+              locked: false,
+              source: 'GENERATED',
             });
-            dOcc.add(sIdx);
+
+            occupiedSlots.get(day)!.add(bestSlotChoice);
+            daySubjectMap.get(day)!.add(subject.subjectCode);
+            daySlotStaffMap.get(day)!.set(bestSlotChoice, staffCode);
+            subjectDaySlot.get(subject.subjectCode)!.set(day, bestSlotChoice);
+          }
+
+          if (theoryPlacementFailed) break;
+        }
+
+        if (theoryPlacementFailed) {
+          lastFailureReason = 'Theory placement failed';
+          continue;
+        }
+
+        // Fill remaining unassigned non-lab afternoon slots (Periods 6 & 7) with Institutional Enrichment Activities
+        const nonLabAfternoons = ['Monday', 'Tuesday', 'Thursday', 'Friday'].filter(d => !labDaysScheduled.has(d));
+        const enrichmentActivities = [
+          { code: 'LIB', name: 'Library & Information Research', notes: 'Digital Library & Research Reading' },
+          { code: 'SEM', name: 'Technical Seminar & Presentation', notes: 'Student Technical Presentations & Soft Skills' },
+          { code: 'MENTOR', name: 'Mentoring & Career Advisory', notes: 'Faculty Mentorship & Career Guidance' },
+          { code: 'TUT', name: 'Tutorial & Practice Hour', notes: 'Analytical Problem Solving & Practice' },
+        ];
+
+        let actIdx = 0;
+        for (const d of nonLabAfternoons) {
+          const dOcc = occupiedSlots.get(d)!;
+          if (!dOcc.has(7) && !dOcc.has(8)) {
+            const act = enrichmentActivities[actIdx % enrichmentActivities.length];
+            actIdx++;
+            for (const sIdx of [7, 8]) {
+              const def = MASTER_PERIOD_DEFINITIONS.find(p => p.slotIndex === sIdx);
+              entries.push({
+                id: `entry_enrich_${d}_${sIdx}`,
+                day: d,
+                slotIndex: sIdx,
+                startTime: def?.startTime || (sIdx === 7 ? '02:30' : '03:20'),
+                endTime: def?.endTime || (sIdx === 7 ? '03:20' : '04:20'),
+                subjectCode: act.code,
+                subjectName: act.name,
+                type: 'SPECIAL',
+                locked: false,
+                source: 'GENERATED',
+                roomId: defaultRoomId,
+                roomNumber: defaultRoomNumber,
+                notes: `${act.notes} (Period ${sIdx === 7 ? '6' : '7'})`,
+              });
+              dOcc.add(sIdx);
+            }
           }
         }
       }
 
       // 5. Strict Validation
-      const validation = TimetableValidator.validate(entries, theorySubjects.concat(labSubjects), allSlots, { reserveWedAfternoon: isWedLockedInConfig });
-      if (!validation.valid) continue;
+      const isWedLockedInConfig = input.rules?.reserveWedAfternoon !== false;
+      const validation = TimetableValidator.validate(
+        entries, 
+        theorySubjects.concat(labSubjects), 
+        allSlots, 
+        { reserveWedAfternoon: isWedLockedInConfig, year: input.year }
+      );
+      if (!validation.valid) {
+        lastFailureReason = 'Validation failed: ' + validation.conflicts?.slice(0, 3).join(' | ');
+        continue;
+      }
 
       // 6. Quality and Distribution Scoring
       const quality = ScheduleOptimizer.calculateQuality(entries, theorySubjects.concat(labSubjects), allSlots);
@@ -694,7 +796,7 @@ export class TimetableScheduler {
     }
 
     if (!bestEntries) {
-      errors.push('Could not generate a valid conflict-free timetable matching all constraints.');
+      errors.push(`Could not generate a valid conflict-free timetable matching all constraints. (Detail: ${lastFailureReason || 'No valid candidate found'})`);
       suggestions.push('Check room availability, ensure all staff are active, and click "Reset Clean Dataset".');
       return { success: false, errors, suggestions };
     }

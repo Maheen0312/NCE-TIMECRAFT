@@ -12,6 +12,62 @@ import { analyzeTimetableWithAI } from './src/server/ai/timetableAnalyzer';
 import { extractTimetableDataWithAI } from './src/server/ai/dataExtractor';
 import { extractTimetableFromImageWithAI } from './src/server/ai/imageExtractor';
 
+import { MASTER_STAFF } from './src/config/timetableConfig';
+
+// In-memory persistent server user store initialized with institution master accounts
+interface ServerUserProfile {
+  uid: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'staff' | 'unauthorized' | 'unrecognized';
+  staffCode?: string | null;
+  department?: string | null;
+  active: boolean;
+  createdAt: string;
+  lastLogin?: string | null;
+}
+
+const serverUsersMap = new Map<string, ServerUserProfile>();
+
+// Seed default institution accounts
+const initialMasterAccounts: ServerUserProfile[] = [
+  {
+    uid: 'admin_primary',
+    name: 'Administrator',
+    email: 'admin@nce.edu',
+    role: 'admin',
+    staffCode: null,
+    department: 'Administration',
+    active: true,
+    createdAt: new Date().toISOString(),
+    lastLogin: new Date().toISOString(),
+  },
+  {
+    uid: 'admin_maheen',
+    name: 'Maheen Mohideen',
+    email: 'maheenmohideen@gmail.com',
+    role: 'admin',
+    staffCode: 'MSM',
+    department: 'Computer Science & Engineering',
+    active: true,
+    createdAt: new Date().toISOString(),
+    lastLogin: new Date().toISOString(),
+  },
+  ...MASTER_STAFF.map(s => ({
+    uid: `staff_${s.staffCode}`,
+    name: s.name,
+    email: s.email,
+    role: 'staff' as const,
+    staffCode: s.staffCode,
+    department: s.department,
+    active: true,
+    createdAt: new Date().toISOString(),
+    lastLogin: null,
+  })),
+];
+
+initialMasterAccounts.forEach(u => serverUsersMap.set(u.uid, u));
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -27,7 +83,7 @@ async function startServer() {
   // Validates administrator secret passcode strictly server-side - NEVER exposed to frontend
   app.post('/api/auth/verify-admin-code', (req, res) => {
     try {
-      const { secretCode } = req.body;
+      const { secretCode, uid, email, displayName, staffCode } = req.body;
       if (!secretCode || typeof secretCode !== 'string') {
         return res.status(400).json({ success: false, message: 'Admin Secret Code is required.' });
       }
@@ -37,14 +93,109 @@ async function startServer() {
         return res.status(401).json({ success: false, message: 'Invalid Admin Secret Code.' });
       }
 
+      let adminProfile: ServerUserProfile | null = null;
+      if (uid) {
+        const existing = serverUsersMap.get(uid);
+        adminProfile = {
+          uid,
+          name: displayName || existing?.name || (email ? email.split('@')[0] : 'Administrator'),
+          email: email || existing?.email || 'admin@nce.edu',
+          role: 'admin',
+          staffCode: staffCode || existing?.staffCode || null,
+          department: existing?.department || 'Administration',
+          active: true,
+          createdAt: existing?.createdAt || new Date().toISOString(),
+          lastLogin: new Date().toISOString(),
+        };
+        serverUsersMap.set(uid, adminProfile);
+      }
+
       return res.json({
         success: true,
         message: 'Admin Secret Code verified successfully.',
         verified: true,
+        adminProfile,
       });
     } catch (error: any) {
       console.error('Error verifying admin secret code:', error);
       return res.status(500).json({ success: false, message: 'Server error verifying admin secret code.' });
+    }
+  });
+
+  // Admin User Directory APIs - Server-Side Auth User Directory
+  app.get('/api/admin/users', (req, res) => {
+    try {
+      const userList = Array.from(serverUsersMap.values());
+      return res.json({
+        success: true,
+        users: userList,
+        count: userList.length,
+      });
+    } catch (error: any) {
+      console.error('Error fetching admin users:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/admin/users/sync', (req, res) => {
+    try {
+      const profile = req.body;
+      if (profile && profile.uid) {
+        const existing = serverUsersMap.get(profile.uid);
+        serverUsersMap.set(profile.uid, {
+          uid: profile.uid,
+          name: profile.name || existing?.name || 'User',
+          email: profile.email || existing?.email || '',
+          role: profile.role || existing?.role || 'staff',
+          staffCode: profile.staffCode || existing?.staffCode || null,
+          department: profile.department || existing?.department || null,
+          active: profile.active !== false,
+          createdAt: existing?.createdAt || new Date().toISOString(),
+          lastLogin: new Date().toISOString(),
+        });
+      }
+      return res.json({ success: true });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/admin/users/role', (req, res) => {
+    try {
+      const { uid, role } = req.body;
+      if (!uid || !role) {
+        return res.status(400).json({ success: false, message: 'UID and role are required.' });
+      }
+      const user = serverUsersMap.get(uid);
+      if (user) {
+        user.role = role;
+        serverUsersMap.set(uid, user);
+      }
+      return res.json({ success: true, message: 'User role updated.' });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.delete('/api/admin/users/:uid', (req, res) => {
+    try {
+      const { uid } = req.params;
+      serverUsersMap.delete(uid);
+      return res.json({ success: true, message: 'User removed from directory.' });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/admin/users/bulk-delete', (req, res) => {
+    try {
+      const { uids } = req.body;
+      if (Array.isArray(uids)) {
+        uids.forEach(uid => serverUsersMap.delete(uid));
+      }
+      return res.json({ success: true, message: 'Selected users removed.' });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, error: error.message });
     }
   });
 

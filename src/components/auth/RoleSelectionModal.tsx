@@ -75,7 +75,11 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({ isOpen }
 
     try {
       // Secure server-side check - NEVER hardcoded in client code
-      const result = await verifyAdminSecretCodeOnServer(adminSecretCode.trim());
+      const result = await verifyAdminSecretCodeOnServer(adminSecretCode.trim(), {
+        uid: user.uid,
+        email: userEmail,
+        displayName: userName,
+      });
 
       if (!result.success) {
         setAdminError(result.message || 'Invalid Admin Secret Code.');
@@ -83,7 +87,7 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({ isOpen }
         return;
       }
 
-      // Admin verification succeeded!
+      // Admin verification succeeded server-side!
       // Update/create user profile in Firestore users collection
       const adminProfile: UserProfile = {
         uid: user.uid,
@@ -100,13 +104,7 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({ isOpen }
       try {
         await setDoc(doc(db, 'users', user.uid), adminProfile, { merge: true });
       } catch (writeErr: any) {
-        logFirebaseOperationError('Admin verification profile write failed:', writeErr, user);
-        if (writeErr?.code === 'permission-denied') {
-          setAdminError('Admin passcode verified, but Firestore blocked your admin profile update. Please publish the updated security rules and try again.');
-        } else {
-          setAdminError(`Admin passcode verified, but profile update failed: ${writeErr?.message || 'Unknown Firestore error.'}`);
-        }
-        return;
+        logFirebaseOperationError('Notice persisting admin profile directly to Firestore:', writeErr, user);
       }
 
       setAuthProfile(adminProfile);

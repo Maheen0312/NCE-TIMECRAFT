@@ -97,95 +97,75 @@ export class TimetableValidator {
       }
     }
 
-    // 4. Wednesday Afternoon Hard Constraint: Naan Muthalvan/Mudhalvan on Wednesday Period 5 (slot 6), Period 6 (slot 7) & Period 7 (slot 8)
-    const isWedLocked = options.reserveWedAfternoon !== false;
+    // 4. Year-Specific Rules & Special Sessions Validation
+    const targetYear = options.year || (subjects.find(s => s.year)?.year) || 'III';
+    const isFinalYear = matchYear(targetYear, 'IV');
+    const isThirdYear = matchYear(targetYear, 'III');
+    const isSecondYear = matchYear(targetYear, 'II');
+
     const isNaanMuthalvanEntry = (e?: TimetableEntry) => {
       if (!e) return false;
-      if (e.type !== 'SPECIAL' && e.type !== 'LOCKED') return false;
       const name = (e.subjectName || '').toLowerCase();
       const code = (e.subjectCode || '').toUpperCase();
       return (
         code === 'NM' ||
         code === 'NM-301' ||
+        code === 'NM-201' ||
         name.includes('naan') ||
         name.includes('mudhalvan') ||
         name.includes('muthalvan')
       );
     };
 
-    if (isWedLocked) {
-      const wednesdayP5 = entries.find(e => e.day === 'Wednesday' && e.slotIndex === 6);
-      const wednesdayP6 = entries.find(e => e.day === 'Wednesday' && e.slotIndex === 7);
-      const wednesdayP7 = entries.find(e => e.day === 'Wednesday' && e.slotIndex === 8);
-
-      if (!isNaanMuthalvanEntry(wednesdayP5)) {
-        const desc = 'Hard Constraint Violation: Wednesday Period 5 must be strictly reserved for "Naan Muthalvan".';
-        lockedSessionConflicts.push(desc);
-        conflicts.push(desc);
-        detailedConflicts.push({
-          type: 'LOCKED_VIOLATION',
-          message: desc,
-          day: 'Wednesday',
-          slotIndex: 6,
-          canAutoFix: false,
-        });
-      }
-
-      if (!isNaanMuthalvanEntry(wednesdayP6)) {
-        const desc = 'Hard Constraint Violation: Wednesday Period 6 must be strictly reserved for "Naan Muthalvan".';
-        lockedSessionConflicts.push(desc);
-        conflicts.push(desc);
-        detailedConflicts.push({
-          type: 'LOCKED_VIOLATION',
-          message: desc,
-          day: 'Wednesday',
-          slotIndex: 7,
-          canAutoFix: false,
-        });
-      }
-
-      if (!isNaanMuthalvanEntry(wednesdayP7)) {
-        const desc = 'Hard Constraint Violation: Wednesday Period 7 must be strictly reserved for "Naan Muthalvan".';
-        lockedSessionConflicts.push(desc);
-        conflicts.push(desc);
-        detailedConflicts.push({
-          type: 'LOCKED_VIOLATION',
-          message: desc,
-          day: 'Wednesday',
-          slotIndex: 8,
-          canAutoFix: false,
-        });
-      }
-
-      // No theory or lab allowed on Wednesday Afternoon (P5, P6, P7)
-      const wednesdayAfternoonClasses = entries.filter(
-        e => e.day === 'Wednesday' && (e.slotIndex === 6 || e.slotIndex === 7 || e.slotIndex === 8) && (e.type === 'THEORY' || e.type === 'LAB')
+    const isCareerGuidanceEntry = (e?: TimetableEntry) => {
+      if (!e) return false;
+      const name = (e.subjectName || '').toLowerCase();
+      const code = (e.subjectCode || '').toUpperCase();
+      return (
+        code === 'CG401' ||
+        name.includes('career') ||
+        name.includes('guidance') ||
+        name.includes('placement') ||
+        name.includes('project')
       );
-      if (wednesdayAfternoonClasses.length > 0) {
-        const desc = 'Hard Constraint Violation: No regular subject or lab classes are permitted on Wednesday afternoon (Period 5, 6 & 7).';
+    };
+
+    // FINAL YEAR (IV) RULES:
+    if (isFinalYear) {
+      // Rule A: Final Year must NEVER have Naan Muthalvan
+      const nmEntriesInFinalYear = entries.filter(e => isNaanMuthalvanEntry(e));
+      if (nmEntriesInFinalYear.length > 0) {
+        const desc = 'Hard Constraint Violation: Final Year must NEVER schedule Naan Muthalvan. Naan Muthalvan is reserved for lower years.';
         conflicts.push(desc);
+        lockedSessionConflicts.push(desc);
         detailedConflicts.push({
           type: 'LOCKED_VIOLATION',
           message: desc,
-          day: 'Wednesday',
           canAutoFix: false,
         });
       }
-    }
 
-    // 4b. Final Year Specific Hard Constraints:
-    // - ONLY 4 allocated subjects.
-    // - Those 4 subjects MUST appear ONLY in MORNING periods (not in afternoon).
-    // - The ENTIRE AFTERNOON must be locked CAREER GUIDANCE (preserving Wednesday Naan Muthalvan if configured).
-    const isFinalYear = (options.year && matchYear(options.year, 'IV')) ||
-      subjects.some(s => matchYear(s.year, 'IV')) ||
-      entries.some(e => ['GE3791', 'GE3752', 'FD352', 'AI3021', 'CG401'].includes(e.subjectCode || ''));
+      // Rule B: Final Year Wednesday afternoon (Periods 5, 6, 7 -> slots 6, 7, 8) is strictly Career Guidance / Placement Training / Project Work
+      for (const slotIdx of [6, 7, 8]) {
+        const periodNum = slotIdx === 6 ? 5 : slotIdx === 7 ? 6 : 7;
+        const wedEntry = entries.find(e => e.day === 'Wednesday' && e.slotIndex === slotIdx);
+        if (!isCareerGuidanceEntry(wedEntry)) {
+          const desc = `Hard Constraint Violation: Final Year Wednesday Period ${periodNum} must be strictly reserved for "Career Guidance / Placement Training / Project Work".`;
+          lockedSessionConflicts.push(desc);
+          conflicts.push(desc);
+          detailedConflicts.push({
+            type: 'LOCKED_VIOLATION',
+            message: desc,
+            day: 'Wednesday',
+            slotIndex: slotIdx,
+            canAutoFix: false,
+          });
+        }
+      }
 
-    if (isFinalYear) {
-      const regularEntries = entries.filter(e => e.type === 'THEORY' || e.type === 'LAB');
-      const allocatedSubjects = new Set(regularEntries.map(e => e.subjectCode).filter(Boolean));
-
-      // Rule: Final Year has ONLY 4 allocated subjects
+      // Rule C: Final Year has 4 subjects
+      const regularFinalEntries = entries.filter(e => e.type === 'THEORY' || e.type === 'LAB');
+      const allocatedSubjects = new Set(regularFinalEntries.map(e => e.subjectCode).filter(Boolean));
       if (allocatedSubjects.size > 4) {
         const desc = `Hard Constraint Violation: Final Year has ONLY 4 allocated subjects. Found ${allocatedSubjects.size} subjects.`;
         conflicts.push(desc);
@@ -196,65 +176,94 @@ export class TimetableValidator {
         });
       }
 
-      // Rule: Those 4 subjects must be scheduled ONLY in MORNING periods (Period 1, 2, 3, 4 -> slots 0, 1, 3, 4)
-      for (const entry of regularEntries) {
-        if (entry.slotIndex >= 6 || entry.slotIndex === 5) {
-          const desc = `Hard Constraint Violation: Final Year allocated subject ${entry.subjectCode || entry.subjectName} must be scheduled ONLY in morning periods. Found on ${entry.day} afternoon (Period ${entry.slotIndex + 1}).`;
+      // Rule D: Final Year must NOT have blank teaching periods during normal teaching hours
+      // Teaching periods: Mon (7), Tue (7), Wed morning (4), Thu (7), Fri (7) = 32 teaching periods total
+      const teachingSlotMatrix: { day: string; slotIndex: number; periodNumber: number }[] = [
+        ...['Monday', 'Tuesday', 'Thursday', 'Friday'].flatMap(day => [
+          { day, slotIndex: 0, periodNumber: 1 },
+          { day, slotIndex: 1, periodNumber: 2 },
+          { day, slotIndex: 3, periodNumber: 3 },
+          { day, slotIndex: 4, periodNumber: 4 },
+          { day, slotIndex: 6, periodNumber: 5 },
+          { day, slotIndex: 7, periodNumber: 6 },
+          { day, slotIndex: 8, periodNumber: 7 },
+        ]),
+        { day: 'Wednesday', slotIndex: 0, periodNumber: 1 },
+        { day: 'Wednesday', slotIndex: 1, periodNumber: 2 },
+        { day: 'Wednesday', slotIndex: 3, periodNumber: 3 },
+        { day: 'Wednesday', slotIndex: 4, periodNumber: 4 },
+      ];
+
+      for (const reqSlot of teachingSlotMatrix) {
+        const entry = entries.find(e => e.day === reqSlot.day && e.slotIndex === reqSlot.slotIndex);
+        if (!entry || (entry.type !== 'THEORY' && entry.type !== 'LAB' && entry.type !== 'SPECIAL')) {
+          const desc = `Hard Constraint Violation: Final Year must not have blank teaching periods during normal teaching hours. Missing class on ${reqSlot.day} Period ${reqSlot.periodNumber}.`;
           conflicts.push(desc);
           detailedConflicts.push({
             type: 'TIME_CONFLICT',
             message: desc,
-            day: entry.day,
-            slotIndex: entry.slotIndex,
-            subjectCode: entry.subjectCode,
+            day: reqSlot.day,
+            slotIndex: reqSlot.slotIndex,
             canAutoFix: false,
           });
         }
       }
-
-      // Rule: The ENTIRE AFTERNOON must be locked CAREER GUIDANCE (Period 5, 6, 7 -> slots 6, 7, 8)
-      // Preserve existing Wednesday afternoon Naan Muthalvan if configured
-      const isCareerGuidanceEntry = (e?: TimetableEntry) => {
-        if (!e) return false;
-        if (e.type !== 'SPECIAL' && e.type !== 'LOCKED') return false;
-        const name = (e.subjectName || '').toLowerCase();
-        const code = (e.subjectCode || '').toUpperCase();
-        return code === 'CG401' || name.includes('career') || name.includes('guidance');
-      };
-
-      const workingDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-      for (const day of workingDays) {
+    } else if (isThirdYear) {
+      // 3RD YEAR (III) RULES:
+      // Wednesday Afternoon Hard Constraint: Naan Muthalvan on Wednesday Periods 5, 6, 7 (slots 6, 7, 8)
+      const isWedLocked = options.reserveWedAfternoon !== false;
+      if (isWedLocked) {
         for (const slotIdx of [6, 7, 8]) {
           const periodNum = slotIdx === 6 ? 5 : slotIdx === 7 ? 6 : 7;
-          const entry = entries.find(e => e.day === day && e.slotIndex === slotIdx);
-
-          if (day === 'Wednesday' && isWedLocked) {
-            if (!isNaanMuthalvanEntry(entry) && !isCareerGuidanceEntry(entry)) {
-              const desc = `Hard Constraint Violation: Final Year Wednesday Period ${periodNum} must be strictly reserved for "Naan Muthalvan" or "Career Guidance".`;
-              lockedSessionConflicts.push(desc);
-              conflicts.push(desc);
-              detailedConflicts.push({
-                type: 'LOCKED_VIOLATION',
-                message: desc,
-                day,
-                slotIndex: slotIdx,
-                canAutoFix: false,
-              });
-            }
-          } else {
-            if (!isCareerGuidanceEntry(entry) || !entry?.locked) {
-              const desc = `Hard Constraint Violation: Final Year ${day} Period ${periodNum} must be strictly reserved for locked "Career Guidance".`;
-              lockedSessionConflicts.push(desc);
-              conflicts.push(desc);
-              detailedConflicts.push({
-                type: 'LOCKED_VIOLATION',
-                message: desc,
-                day,
-                slotIndex: slotIdx,
-                canAutoFix: false,
-              });
-            }
+          const wedEntry = entries.find(e => e.day === 'Wednesday' && e.slotIndex === slotIdx);
+          if (!isNaanMuthalvanEntry(wedEntry)) {
+            const desc = `Hard Constraint Violation: 3rd Year Wednesday Period ${periodNum} must be strictly reserved for "Naan Muthalvan".`;
+            lockedSessionConflicts.push(desc);
+            conflicts.push(desc);
+            detailedConflicts.push({
+              type: 'LOCKED_VIOLATION',
+              message: desc,
+              day: 'Wednesday',
+              slotIndex: slotIdx,
+              canAutoFix: false,
+            });
           }
+        }
+
+        // No regular subject or lab classes allowed on Wednesday Afternoon
+        const wednesdayAfternoonClasses = entries.filter(
+          e => e.day === 'Wednesday' && (e.slotIndex === 6 || e.slotIndex === 7 || e.slotIndex === 8) && (e.type === 'THEORY' || e.type === 'LAB')
+        );
+        if (wednesdayAfternoonClasses.length > 0) {
+          const desc = 'Hard Constraint Violation: No regular subject or lab classes are permitted on Wednesday afternoon for 3rd Year.';
+          conflicts.push(desc);
+          detailedConflicts.push({
+            type: 'LOCKED_VIOLATION',
+            message: desc,
+            day: 'Wednesday',
+            canAutoFix: false,
+          });
+        }
+      }
+    } else if (isSecondYear) {
+      // 2ND YEAR (II) RULES:
+      // Naan Muthalvan occurs on configured day (e.g. Thursday PM) - verify it is present if configured
+      const nmEntriesIn2ndYear = entries.filter(e => isNaanMuthalvanEntry(e));
+      if (nmEntriesIn2ndYear.length > 0) {
+        const nmDay = nmEntriesIn2ndYear[0].day;
+        // Verify no regular classes overlap with 2nd Year Naan Muthalvan
+        const overlaps = entries.filter(
+          e => e.day === nmDay && [6, 7, 8].includes(e.slotIndex) && (e.type === 'THEORY' || e.type === 'LAB')
+        );
+        if (overlaps.length > 0) {
+          const desc = `Hard Constraint Violation: No regular classes allowed during 2nd Year Naan Muthalvan on ${nmDay} afternoon.`;
+          conflicts.push(desc);
+          detailedConflicts.push({
+            type: 'LOCKED_VIOLATION',
+            message: desc,
+            day: nmDay,
+            canAutoFix: false,
+          });
         }
       }
     }
@@ -328,17 +337,44 @@ export class TimetableValidator {
     }
 
     daySubjectMap.forEach((group, key) => {
-      if (group.length > 1) {
-        const [day, subjectCode] = key.split('_');
-        const desc = `Distribution Violation: Subject ${subjectCode} is scheduled ${group.length} times on ${day}. Max 1 period per day allowed.`;
-        conflicts.push(desc);
-        detailedConflicts.push({
-          type: 'CONSECUTIVE_LIMIT',
-          message: desc,
-          day,
-          subjectCode,
-          canAutoFix: true,
-        });
+      const [day, subjectCode] = key.split('_');
+      if (isFinalYear) {
+        if (group.length > 2) {
+          const desc = `Distribution Violation: Final Year subject ${subjectCode} is scheduled ${group.length} times on ${day}. Max 2 periods per day allowed.`;
+          conflicts.push(desc);
+          detailedConflicts.push({
+            type: 'CONSECUTIVE_LIMIT',
+            message: desc,
+            day,
+            subjectCode,
+            canAutoFix: true,
+          });
+        } else if (group.length === 2) {
+          const sortedSlots = group.map(g => g.slotIndex).sort((a, b) => a - b);
+          if (sortedSlots[1] - sortedSlots[0] === 1) {
+            const desc = `Consecutive Violation: Final Year subject ${subjectCode} has 2 consecutive periods on ${day} (slots ${sortedSlots[0]} and ${sortedSlots[1]}).`;
+            conflicts.push(desc);
+            detailedConflicts.push({
+              type: 'CONSECUTIVE_LIMIT',
+              message: desc,
+              day,
+              subjectCode,
+              canAutoFix: true,
+            });
+          }
+        }
+      } else {
+        if (group.length > 1) {
+          const desc = `Distribution Violation: Subject ${subjectCode} is scheduled ${group.length} times on ${day}. Max 1 period per day allowed.`;
+          conflicts.push(desc);
+          detailedConflicts.push({
+            type: 'CONSECUTIVE_LIMIT',
+            message: desc,
+            day,
+            subjectCode,
+            canAutoFix: true,
+          });
+        }
       }
     });
 

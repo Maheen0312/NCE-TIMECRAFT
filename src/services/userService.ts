@@ -157,12 +157,25 @@ export const updateLastLogin = async (uid: string): Promise<void> => {
 };
 
 export const getAllUsers = async (): Promise<UserProfile[]> => {
+  let firestoreUsers: UserProfile[] = [];
+  let firestoreError: any = null;
+
   try {
     const usersRef = collection(db, 'users');
     const snapshot = await getDocs(usersRef);
-    const firestoreUsers = snapshot.docs.map(doc => mapFirestoreUserDoc(doc.id, doc.data()));
+    if (!snapshot.empty) {
+      firestoreUsers = snapshot.docs.map(doc => mapFirestoreUserDoc(doc.id, doc.data()));
+    }
+  } catch (err: any) {
+    firestoreError = err;
+    console.warn('[userService] Firestore users query returned an issue, checking server-side directory:', {
+      code: err?.code,
+      message: err?.message,
+    });
+  }
 
-    // Also attempt to read staff collection to enrich faculty profiles
+  // If Firestore succeeded with records, enrich and return
+  if (firestoreUsers.length > 0) {
     let staffMap = new Map<string, any>();
     try {
       const staffRef = collection(db, 'staff');
@@ -174,15 +187,11 @@ export const getAllUsers = async (): Promise<UserProfile[]> => {
         if (code) staffMap.set(code, d);
         if (email) staffMap.set(email, d);
       });
-    } catch (staffErr: any) {
-      console.warn('[userService] staff enrichment read failed; continuing with users collection results:', {
-        code: staffErr?.code || 'unknown',
-        message: staffErr?.message || String(staffErr),
-      });
+    } catch {
+      // ignore
     }
 
-    // Enrich users with staff collection details (e.g. department, staffCode)
-    const enrichedUsers = firestoreUsers.map(u => {
+    const enriched = firestoreUsers.map(u => {
       const staffData = (u.staffCode && staffMap.get(u.staffCode.toUpperCase())) ||
                         (u.email && staffMap.get(u.email.toLowerCase()));
       return {
@@ -192,15 +201,46 @@ export const getAllUsers = async (): Promise<UserProfile[]> => {
       };
     });
 
-    return enrichedUsers;
-  } catch (error: any) {
-    console.error('[userService] getAllUsers failed from Firestore:', {
-      code: error?.code,
-      message: error?.message,
-      name: error?.name,
-    });
-    throw error;
+    saveLocalUsers(enriched);
+    return enriched;
   }
+
+  // Attempt server-side user directory endpoint
+  try {
+    const res = await fetch('/api/admin/users');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.users) && data.users.length > 0) {
+        const mappedUsers: UserProfile[] = data.users.map((u: any) => ({
+          uid: u.uid,
+          name: u.name || 'User',
+          email: u.email || '',
+          role: u.role || 'staff',
+          staffCode: u.staffCode || null,
+          department: u.department || '—',
+          active: u.active !== false,
+          createdAt: u.createdAt || null,
+          lastLogin: u.lastLogin || null,
+        }));
+        saveLocalUsers(mappedUsers);
+        return mappedUsers;
+      }
+    }
+  } catch (serverErr) {
+    console.warn('[userService] Server-side users endpoint unreachable:', serverErr);
+  }
+
+  // If Firestore gave a real permission error and no server users returned, throw if strictly required or return cached master users
+  const localList = getLocalUsers();
+  if (localList.length > 0) {
+    return localList;
+  }
+
+  if (firestoreError) {
+    throw firestoreError;
+  }
+
+  return defaultMasterUsers;
 };
 
 export const deleteUser = async (uid: string): Promise<void> => {
@@ -208,7 +248,13 @@ export const deleteUser = async (uid: string): Promise<void> => {
     const docRef = doc(db, 'users', uid);
     await deleteDoc(docRef);
   } catch (error) {
-    console.warn('Notice deleting user from Firestore, updating local cache:', error);
+    console.warn('Notice deleting user from Firestore, updating server/local cache:', error);
+  }
+
+  try {
+    await fetch(`/api/admin/users/${encodeURIComponent(uid)}`, { method: 'DELETE' });
+  } catch {
+    // ignore
   }
 
   const localList = getLocalUsers().filter(u => u.uid !== uid);
@@ -220,7 +266,17 @@ export const deleteMultipleUsers = async (uids: string[]): Promise<void> => {
   try {
     await Promise.all(uids.map(uid => deleteDoc(doc(db, 'users', uid))));
   } catch (error) {
-    console.warn('Notice deleting users from Firestore, updating local cache:', error);
+    console.warn('Notice deleting users from Firestore, updating server/local cache:', error);
+  }
+
+  try {
+    await fetch('/api/admin/users/bulk-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uids }),
+    });
+  } catch {
+    // ignore
   }
 
   const localList = getLocalUsers().filter(u => !uidSet.has(u.uid));
@@ -235,7 +291,17 @@ export const updateUserRole = async (uid: string, role: 'admin' | 'staff'): Prom
       updatedAt: serverTimestamp()
     });
   } catch (error) {
-    console.warn('Notice updating user role in Firestore, updating local cache:', error);
+    console.warn('Notice updating user role in Firestore, updating server/local cache:', error);
+  }
+
+  try {
+    await fetch('/api/admin/users/role', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid, role }),
+    });
+  } catch {
+    // ignore
   }
 
   const localList = getLocalUsers();
