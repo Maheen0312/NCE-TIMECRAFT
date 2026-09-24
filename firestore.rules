@@ -1,0 +1,117 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isEmailAdmin() {
+      return isAuthenticated() && 
+        request.auth.token != null &&
+        'email' in request.auth.token &&
+        request.auth.token.email != null &&
+        (
+          request.auth.token.email == 'admin@nce.edu' ||
+          request.auth.token.email == 'maheenmohideen@gmail.com' ||
+          request.auth.token.email.matches('.*admin.*@.*') ||
+          request.auth.token.email.matches('.*@nce\\.edu')
+        );
+    }
+
+    function isDocAdmin() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         'role' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'Admin', 'ADMIN', 'administrator', 'Administrator']) ||
+        (exists(/databases/$(database)/documents/staff/$(request.auth.uid)) &&
+         'role' in get(/databases/$(database)/documents/staff/$(request.auth.uid)).data &&
+         get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role in ['admin', 'Admin', 'ADMIN', 'administrator', 'Administrator'])
+      );
+    }
+
+    function isAdmin() {
+      return isEmailAdmin() || isDocAdmin();
+    }
+
+    function isStaff() {
+      return isAuthenticated() && (
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         'role' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['staff', 'Staff', 'STAFF', 'faculty', 'Faculty']) ||
+        (exists(/databases/$(database)/documents/staff/$(request.auth.uid)) &&
+         'role' in get(/databases/$(database)/documents/staff/$(request.auth.uid)).data &&
+         get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role in ['staff', 'Staff', 'STAFF', 'faculty', 'Faculty'])
+      );
+    }
+
+    // Users Collection - Authenticated institutional accounts can list and view directory
+    match /users/{userId} {
+      allow get, list: if isAuthenticated();
+      allow create, update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
+    }
+    
+    // Staff Collection - Authenticated faculty can view directory; Admin/Faculty manage
+    match /staff/{staffId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (isAdmin() || isStaff() || request.auth.uid == staffId);
+    }
+
+    // Academic & Scheduling Collections - Authenticated users can read and manage schedules
+    match /departments/{deptId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /classes/{classId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /subjects/{subjectId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /rooms/{roomId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /labs/{labId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /timeSlots/{slotId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /specialSessions/{sessionId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /schedulingRules/{ruleId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /timetables/{timetableId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /timetableVersions/{versionId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /settings/{settingId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /notifications/{notificationId} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /audit_logs/{logId} {
+      allow read, create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+  }
+}

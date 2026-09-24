@@ -1,0 +1,57 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", sans-serif;
+
+  --color-luna-dark-navy: #011C40;
+  --color-luna-deep-navy: #022b54;
+  --color-luna-deep-blue: #023859;
+  --color-luna-primary-blue: #26658C;
+  --color-luna-steel-blue: #1b4b68;
+  --color-luna-cyan: #54ACBF;
+  --color-luna-light-cyan: #A7EBF2;
+}
+
+@layer base {
+  :root {
+    --background: #ffffff;
+    --foreground: #011C40;
+  }
+
+  .dark {
+    --background: #01142d;
+    --foreground: #f1f5f9;
+  }
+  
+  body {
+    @apply bg-white text-luna-dark-navy font-sans antialiased transition-colors duration-150;
+  }
+
+  .dark body {
+    @apply bg-[#01142d] text-slate-100;
+  }
+}
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+  
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 10pt;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+}

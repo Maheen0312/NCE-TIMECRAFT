@@ -1,0 +1,12 @@
+{
+  "projectId": "nce-timecraft",
+  "appId": "1:525448151763:web:e74a891bda5c0378deca26",
+  "apiKey": "AIzaSyCPHFcC3zV83uIPglAXLgsr9_6ihD-Y0-w",
+  "authDomain": "nce-timecraft.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "nce-timecraft.firebasestorage.app",
+  "messagingSenderId": "525448151763",
+  "measurementId": "G-VRY97DX3LG",
+  "oAuthClientId": "",
+  "recaptchaSiteKey": ""
+}

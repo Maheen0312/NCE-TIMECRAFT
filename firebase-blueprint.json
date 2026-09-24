@@ -1,0 +1,151 @@
+{
+  "schema_version": "1.0",
+  "collections": [
+    {
+      "name": "users",
+      "description": "User profiles containing roles and authentication metadata.",
+      "document_id": "uid",
+      "fields": [
+        { "name": "uid", "type": "string" },
+        { "name": "name", "type": "string" },
+        { "name": "email", "type": "string" },
+        { "name": "role", "type": "string" },
+        { "name": "staffCode", "type": "string", "optional": true },
+        { "name": "active", "type": "boolean" },
+        { "name": "createdAt", "type": "timestamp" },
+        { "name": "lastLogin", "type": "timestamp" }
+      ]
+    },
+    {
+      "name": "staff",
+      "description": "Staff profiles connected to timetable assignments.",
+      "document_id": "staffId",
+      "fields": [
+        { "name": "staffCode", "type": "string" },
+        { "name": "name", "type": "string" },
+        { "name": "email", "type": "string" },
+        { "name": "department", "type": "string" },
+        { "name": "active", "type": "boolean" },
+        { "name": "userId", "type": "string", "optional": true },
+        { "name": "createdAt", "type": "timestamp", "optional": true },
+        { "name": "updatedAt", "type": "timestamp", "optional": true }
+      ]
+    },
+    {
+      "name": "subjects",
+      "description": "Course curriculum and department subjects.",
+      "document_id": "subjectId",
+      "fields": [
+        { "name": "subjectCode", "type": "string" },
+        { "name": "subjectName", "type": "string" },
+        { "name": "type", "type": "string" },
+        { "name": "weeklyHours", "type": "number" },
+        { "name": "assignedStaff", "type": "array" },
+        { "name": "department", "type": "string" },
+        { "name": "year", "type": "string" },
+        { "name": "semester", "type": "string" },
+        { "name": "active", "type": "boolean" },
+        { "name": "createdAt", "type": "timestamp", "optional": true },
+        { "name": "updatedAt", "type": "timestamp", "optional": true }
+      ]
+    },
+    {
+      "name": "labs",
+      "description": "Laboratory facilities and practical resources.",
+      "document_id": "labId",
+      "fields": [
+        { "name": "labCode", "type": "string" },
+        { "name": "labName", "type": "string" },
+        { "name": "capacity", "type": "number" },
+        { "name": "duration", "type": "number" },
+        { "name": "preferredPeriod", "type": "string" },
+        { "name": "active", "type": "boolean" }
+      ]
+    },
+    {
+      "name": "rooms",
+      "description": "Physical rooms and classroom allocations.",
+      "document_id": "roomId",
+      "fields": [
+        { "name": "roomNumber", "type": "string" },
+        { "name": "roomName", "type": "string" },
+        { "name": "type", "type": "string" },
+        { "name": "capacity", "type": "number" },
+        { "name": "active", "type": "boolean" }
+      ]
+    },
+    {
+      "name": "timeSlots",
+      "description": "Configured timetable periods for academic days.",
+      "document_id": "slotId",
+      "fields": [
+        { "name": "day", "type": "string" },
+        { "name": "startTime", "type": "string" },
+        { "name": "endTime", "type": "string" },
+        { "name": "type", "type": "string" },
+        { "name": "order", "type": "number" },
+        { "name": "active", "type": "boolean" }
+      ]
+    },
+    {
+      "name": "specialSessions",
+      "description": "Locked sessions like Naan Mudhalvan that cannot be overwritten.",
+      "document_id": "sessionId",
+      "fields": [
+        { "name": "name", "type": "string" },
+        { "name": "day", "type": "string" },
+        { "name": "startTime", "type": "string", "optional": true },
+        { "name": "endTime", "type": "string", "optional": true },
+        { "name": "period", "type": "string" },
+        { "name": "type", "type": "string" },
+        { "name": "locked", "type": "boolean" },
+        { "name": "description", "type": "string", "optional": true }
+      ]
+    },
+    {
+      "name": "schedulingRules",
+      "description": "Global constraints and parameters for timetable generation.",
+      "document_id": "ruleId",
+      "fields": [
+        { "name": "theoryDefaultHours", "type": "number" },
+        { "name": "labDefaultDuration", "type": "number" },
+        { "name": "workingDays", "type": "array" },
+        { "name": "preferTheoryMorning", "type": "boolean" },
+        { "name": "preferLabsAfternoon", "type": "boolean" },
+        { "name": "avoidConsecutiveSameSubject", "type": "boolean" },
+        { "name": "maxConsecutiveClasses", "type": "number" }
+      ]
+    },
+    {
+      "name": "timetables",
+      "description": "Generated master timetables with draft and published versions.",
+      "document_id": "timetableId",
+      "fields": [
+        { "name": "name", "type": "string" },
+        { "name": "department", "type": "string" },
+        { "name": "year", "type": "string" },
+        { "name": "semester", "type": "string" },
+        { "name": "status", "type": "string" },
+        { "name": "version", "type": "number" },
+        { "name": "createdBy", "type": "string" },
+        { "name": "createdAt", "type": "timestamp" },
+        { "name": "updatedAt", "type": "timestamp" },
+        { "name": "qualityScore", "type": "number" },
+        { "name": "entries", "type": "array" },
+        { "name": "validation", "type": "map" }
+      ]
+    },
+    {
+      "name": "timetableVersions",
+      "description": "Audit history of generated timetable iterations.",
+      "document_id": "versionId",
+      "fields": [
+        { "name": "timetableId", "type": "string" },
+        { "name": "version", "type": "number" },
+        { "name": "status", "type": "string" },
+        { "name": "createdAt", "type": "timestamp" },
+        { "name": "createdBy", "type": "string" }
+      ]
+    }
+  ]
+}
