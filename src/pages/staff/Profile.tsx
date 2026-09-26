@@ -9,7 +9,7 @@ import { BookOpen, CheckCircle2, Save, RefreshCw } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
 export default function StaffProfile() {
-  const { authorizedStaff, profile } = useAuth();
+  const { authorizedStaff, profile, isAuthenticated, loading: authLoading } = useAuth();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -26,6 +26,7 @@ export default function StaffProfile() {
   const staffCode = authorizedStaff?.staffCode || profile?.staffCode || '';
 
   useEffect(() => {
+    if (authLoading || !isAuthenticated) return;
     const loadData = async () => {
       setLoading(true);
       try {
@@ -50,7 +51,7 @@ export default function StaffProfile() {
           });
         }
       } catch (e) {
-        console.error('Failed to load profile data:', e);
+        console.warn('Notice loading profile data:', e);
       } finally {
         setLoading(false);
       }

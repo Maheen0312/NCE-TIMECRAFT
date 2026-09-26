@@ -5,26 +5,27 @@ import { getAllSubjects, Subject } from '@/services/subjectService';
 import { BookOpen, Clock, Users, FlaskConical, RefreshCw } from 'lucide-react';
 
 export default function StaffSubjects() {
-  const { authorizedStaff, profile } = useAuth();
+  const { authorizedStaff, profile, isAuthenticated, loading: authLoading } = useAuth();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
 
   const staffCode = authorizedStaff?.staffCode || profile?.staffCode || '';
 
   useEffect(() => {
+    if (authLoading || !isAuthenticated) return;
     const load = async () => {
       setLoading(true);
       try {
         const subList = await getAllSubjects();
         setSubjects(subList);
       } catch (e) {
-        console.error('Failed to load subjects:', e);
+        console.warn('Notice loading subjects:', e);
       } finally {
         setLoading(false);
       }
     };
     load();
-  }, []);
+  }, [authLoading, isAuthenticated]);
 
   const mySubjects = subjects.filter(
     s => staffCode && s.assignedStaff && s.assignedStaff.includes(staffCode)

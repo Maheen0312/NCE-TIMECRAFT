@@ -187,7 +187,7 @@ export class TimetableValidator {
 
         for (const ms of morningSlots) {
           const entry = entries.find(e => e.day === day && e.slotIndex === ms.slotIndex);
-          if (!entry || (entry.type !== 'THEORY' && entry.type !== 'CLASS')) {
+          if (!entry || entry.type !== 'THEORY') {
             const desc = `Final Year morning teaching period ${ms.pNum} on ${day} is blank or not a theory subject.`;
             conflicts.push(desc);
             detailedConflicts.push({
@@ -229,17 +229,17 @@ export class TimetableValidator {
 
       // 4. Weekly Hours Check: each of the 4 subjects must be scheduled exactly 5 hours across the week
       for (const subj of finalSubjects) {
-        const count = entries.filter(e => e.subjectCode === subj.subjectCode && (e.type === 'THEORY' || e.type === 'CLASS')).length;
+        const count = entries.filter(e => e.subjectCode === subj.subjectCode && e.type === 'THEORY').length;
         if (count !== 5) {
           const desc = `Subject ${subj.subjectCode} (${subj.subjectName}) has ${count} scheduled hours (expected 5 hours: 1 per day).`;
           conflicts.push(desc);
           missingHours.push({
             subjectCode: subj.subjectCode,
             subjectName: subj.subjectName,
-            requiredHours: 5,
-            allocatedHours: count,
-            difference: count - 5,
-            staffCode: subj.assignedStaff?.[0],
+            required: 5,
+            scheduled: count,
+            missing: Math.max(0, 5 - count),
+            diff: count - 5,
           });
           detailedConflicts.push({
             type: 'WEEKLY_HOURS',

@@ -2,8 +2,9 @@ import {
   collection, 
   doc, 
   getDocs, 
+  getDoc,
   addDoc, 
-  setDoc,
+  setDoc, 
   updateDoc, 
   deleteDoc, 
   query, 
@@ -30,103 +31,76 @@ const defaultMasterLabs: Lab[] = MASTER_LABS.map(l => ({
   active: true,
 }));
 
+let pendingLabsPromise: Promise<Lab[]> | null = null;
+
 export const getAllLabs = async (): Promise<Lab[]> => {
-  await waitForAuth();
-  try {
-    const labsRef = collection(db, LABS_COLLECTION);
-    const querySnapshot = await getDocs(labsRef);
-    const rawLabs = querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    } as Lab));
-
-    // Also fetch subjects with type === 'LAB' to guarantee complete synchronization
-    const subjectsRef = collection(db, SUBJECTS_COLLECTION);
-    const subSnapshot = await getDocs(subjectsRef);
-    const labSubjects: Subject[] = subSnapshot.docs
-      .map(d => ({ id: d.id, ...d.data() } as Subject))
-      .filter(s => s.type === 'LAB' || (s.subjectName || '').toLowerCase().includes('lab') || (s.subjectName || '').toLowerCase().includes('laboratory'));
-
-    // Map existing labs by normalized code
-    const labMap = new Map<string, Lab>();
-    for (const l of rawLabs) {
-      const code = (l.labCode || l.id || '').toString().trim().toUpperCase();
-      if (code) {
-        labMap.set(code, l);
-      }
-    }
-
-    // Auto-incorporate and sync any LAB subjects that aren't yet in labs collection
-    const missingLabsToSync: Omit<Lab, 'id'>[] = [];
-    for (const sub of labSubjects) {
-      const code = (sub.subjectCode || sub.id || '').toString().trim().toUpperCase();
-      if (!code) continue;
-
-      if (!labMap.has(code)) {
-        const synthesizedLab: Lab = {
-          id: `lab_${code}`,
-          labCode: code,
-          labName: sub.subjectName || code,
-          capacity: 35,
-          duration: sub.weeklyHours || 2,
-          preferredPeriod: 'Afternoon',
-          department: sub.department || 'Computer Science & Engineering',
-          active: sub.active !== undefined ? sub.active : true,
-        };
-        labMap.set(code, synthesizedLab);
-        missingLabsToSync.push({
-          labCode: code,
-          labName: sub.subjectName || code,
-          capacity: 35,
-          duration: sub.weeklyHours || 2,
-          preferredPeriod: 'Afternoon',
-          department: sub.department || 'Computer Science & Engineering',
-          active: sub.active !== undefined ? sub.active : true,
-        });
-      }
-    }
-
-    // Background sync missing labs to Firestore so future queries are persistent
-    if (missingLabsToSync.length > 0) {
-      Promise.all(
-        missingLabsToSync.map(ml => 
-          setDoc(doc(db, LABS_COLLECTION, `lab_${ml.labCode}`), {
-            ...ml,
-            createdAt: new Date().toISOString(),
-          }, { merge: true }).catch(err => console.warn('Background lab sync notice:', err))
-        )
-      ).catch(() => {});
-    }
-
-    return labMap.size > 0 ? Array.from(labMap.values()) : defaultMasterLabs;
-  } catch (error) {
-    console.warn('Notice fetching labs from Firestore, falling back to master labs configuration:', error);
-    return defaultMasterLabs;
+  const user = await waitForAuth();
+  if (!user || !user.uid) {
+    return [];
   }
+
+  if (pendingLabsPromise) {
+    return pendingLabsPromise;
+  }
+
+  pendingLabsPromise = (async () => {
+    try {
+      const labsRef = collection(db, LABS_COLLECTION);
+      const querySnapshot = await getDocs(labsRef);
+      const rawLabs = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as Lab));
+
+      if (rawLabs.length === 0) {
+        return defaultMasterLabs;
+      }
+
+      // Deduplicate by normalized code
+      const labMap = new Map<string, Lab>();
+      for (const l of rawLabs) {
+        const code = (l.labCode || l.id || '').toString().trim().toUpperCase();
+        if (code && !labMap.has(code)) {
+          labMap.set(code, l);
+        }
+      }
+
+      return Array.from(labMap.values());
+    } catch (error: any) {
+      console.warn('[labService] Notice reading labs from Firestore, using institutional catalog:', error?.message || error);
+      return defaultMasterLabs;
+    } finally {
+      pendingLabsPromise = null;
+    }
+  })();
+
+  return pendingLabsPromise;
 };
 
 export const getLabByCode = async (labCode: string): Promise<Lab | null> => {
+  const user = await waitForAuth();
+  if (!user || !user.uid) return null;
+
   try {
     const code = (labCode || '').toString().trim().toUpperCase();
     if (!code) return null;
+    const docRef = doc(db, LABS_COLLECTION, `lab_${code}`);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return { id: snap.id, ...snap.data() } as Lab;
+    }
+
     const labsRef = collection(db, LABS_COLLECTION);
     const q = query(labsRef, where('labCode', '==', code));
     const snapshot = await getDocs(q);
     if (!snapshot.empty) {
-      const doc = snapshot.docs[0];
-      return { id: doc.id, ...doc.data() } as Lab;
-    }
-
-    // Check by doc ID
-    const directDoc = await getDocs(query(labsRef));
-    const matched = directDoc.docs.find(d => d.id === `lab_${code}` || ((d.data() as Lab).labCode || '').toString().toUpperCase() === code);
-    if (matched) {
-      return { id: matched.id, ...matched.data() } as Lab;
+      const d = snapshot.docs[0];
+      return { id: d.id, ...d.data() } as Lab;
     }
 
     return null;
   } catch (error) {
-    console.error('Error fetching lab by code:', error);
+    console.warn('Notice fetching lab by code:', error);
     return null;
   }
 };
@@ -151,7 +125,7 @@ export const createLab = async (data: Omit<Lab, 'id'>): Promise<string> => {
     active: data.active !== undefined ? data.active : true,
   });
 
-  // Also auto-sync/create corresponding practical subject if not existing
+  // Auto-sync corresponding practical subject in subjects collection
   try {
     const subRef = doc(db, SUBJECTS_COLLECTION, `sub_${code}`);
     await setDoc(subRef, {
@@ -165,7 +139,7 @@ export const createLab = async (data: Omit<Lab, 'id'>): Promise<string> => {
       active: data.active !== undefined ? data.active : true,
     }, { merge: true });
   } catch (subErr) {
-    console.warn('Auto-sync subject from lab notice:', subErr);
+    console.warn('Auto-sync subject from lab note:', subErr);
   }
 
   return docId;
@@ -193,7 +167,7 @@ export const updateLab = async (id: string, data: Partial<Lab>): Promise<void> =
         await setDoc(subRef, subUpdate, { merge: true });
       }
     } catch (subErr) {
-      console.warn('Update subject sync notice:', subErr);
+      console.warn('Update subject sync note:', subErr);
     }
   }
 };
@@ -243,5 +217,3 @@ export const syncLabsWithSubjects = async (): Promise<{ count: number; syncedCod
 };
 
 export const getLabs = getAllLabs;
-
-

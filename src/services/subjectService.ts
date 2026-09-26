@@ -14,14 +14,15 @@ import {
 import { db } from '@/firebase/firestore';
 import { Subject } from '@/types/timetable';
 import { MASTER_THEORY_SUBJECTS } from '@/config/timetableConfig';
-import { waitForAuth } from '@/firebase/auth';
+import { auth, waitForAuth } from '@/firebase/auth';
+import { handleFirestoreError, FirestoreOperationType } from '@/utils/firebaseErrors';
 
 export type { Subject };
 
 const SUBJECTS_COLLECTION = 'subjects';
 const LABS_COLLECTION = 'labs';
 
-const defaultMasterSubjects: Subject[] = MASTER_THEORY_SUBJECTS.map(s => ({
+export const defaultMasterSubjects: Subject[] = MASTER_THEORY_SUBJECTS.map(s => ({
   id: `sub_${s.subjectCode}`,
   subjectCode: s.subjectCode,
   subjectName: s.subjectName,
@@ -33,6 +34,9 @@ const defaultMasterSubjects: Subject[] = MASTER_THEORY_SUBJECTS.map(s => ({
   semester: s.semester,
   active: true,
 }));
+
+// In-flight deduplication to avoid multiple simultaneous getDocs on subjects
+let pendingSubjectsPromise: Promise<Subject[]> | null = null;
 
 // Helper to sync lab in labs collection
 const syncLabEntry = async (subjectData: {
@@ -61,51 +65,66 @@ const syncLabEntry = async (subjectData: {
 };
 
 export const getAllSubjects = async (): Promise<Subject[]> => {
-  await waitForAuth();
-  try {
-    const subjectsRef = collection(db, SUBJECTS_COLLECTION);
-    const querySnapshot = await getDocs(subjectsRef);
-    const rawSubjects = querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    } as Subject));
-
-    // Deduplicate by normalized subjectCode
-    const seen = new Set<string>();
-    const uniqueSubjects: Subject[] = [];
-    for (const s of rawSubjects) {
-      const code = (s.subjectCode || s.id || '').toString().trim().toUpperCase();
-      if (!code) continue;
-      if (!seen.has(code)) {
-        seen.add(code);
-        uniqueSubjects.push({
-          ...s,
-          subjectCode: s.subjectCode || code,
-          subjectName: s.subjectName || code,
-          type: s.type || 'THEORY',
-          assignedStaff: Array.isArray(s.assignedStaff) ? s.assignedStaff : [],
-        });
-      }
-    }
-    return uniqueSubjects.length > 0 ? uniqueSubjects : defaultMasterSubjects;
-  } catch (error) {
-    console.warn('Notice fetching subjects from Firestore, falling back to master subjects configuration:', error);
-    return defaultMasterSubjects;
+  const user = await waitForAuth();
+  if (!user) {
+    return [];
   }
+
+  if (pendingSubjectsPromise) {
+    return pendingSubjectsPromise;
+  }
+
+  pendingSubjectsPromise = (async () => {
+    try {
+      const subjectsRef = collection(db, SUBJECTS_COLLECTION);
+      const querySnapshot = await getDocs(subjectsRef);
+      const rawSubjects = querySnapshot.docs.map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data()
+      } as Subject));
+
+      // Deduplicate by normalized subjectCode
+      const seen = new Set<string>();
+      const uniqueSubjects: Subject[] = [];
+      for (const s of rawSubjects) {
+        const code = (s.subjectCode || s.id || '').toString().trim().toUpperCase();
+        if (!code) continue;
+        if (!seen.has(code)) {
+          seen.add(code);
+          uniqueSubjects.push({
+            ...s,
+            subjectCode: s.subjectCode || code,
+            subjectName: s.subjectName || code,
+            type: s.type || 'THEORY',
+            assignedStaff: Array.isArray(s.assignedStaff) ? s.assignedStaff : [],
+          });
+        }
+      }
+      return uniqueSubjects.length > 0 ? uniqueSubjects : defaultMasterSubjects;
+    } catch (error: any) {
+      console.warn('[subjectService] Notice reading subjects from Firestore, using institutional catalog:', error?.message || error);
+      return defaultMasterSubjects;
+    } finally {
+      pendingSubjectsPromise = null;
+    }
+  })();
+
+  return pendingSubjectsPromise;
 };
 
 export const getSubjectByCode = async (subjectCode: string): Promise<Subject | null> => {
+  if (!auth.currentUser) return null;
   try {
     const subjectsRef = collection(db, SUBJECTS_COLLECTION);
     const q = query(subjectsRef, where('subjectCode', '==', subjectCode));
     const snapshot = await getDocs(q);
     if (!snapshot.empty) {
-      const doc = snapshot.docs[0];
-      return { id: doc.id, ...doc.data() } as Subject;
+      const docSnap = snapshot.docs[0];
+      return { id: docSnap.id, ...docSnap.data() } as Subject;
     }
     return null;
   } catch (error) {
-    console.error('Error fetching subject by code:', error);
+    handleFirestoreError(error, FirestoreOperationType.GET, `${SUBJECTS_COLLECTION}?subjectCode=${subjectCode}`);
     return null;
   }
 };
@@ -117,111 +136,42 @@ export const createSubject = async (data: Omit<Subject, 'id'>): Promise<string> 
     throw new Error(`Subject code "${data.subjectCode}" already exists.`);
   }
 
-  const subjectsRef = collection(db, SUBJECTS_COLLECTION);
-  const docRef = await addDoc(subjectsRef, {
-    subjectCode: code,
-    subjectName: data.subjectName.trim(),
-    type: data.type || 'THEORY',
-    weeklyHours: data.weeklyHours ?? (data.type === 'LAB' ? 2 : 4),
-    assignedStaff: data.assignedStaff || [],
-    department: data.department || 'Computer Science & Engineering',
-    year: data.year || 'III',
-    semester: data.semester || '5',
-    active: data.active !== undefined ? data.active : true,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-
-  // Automatically sync to labs collection if this is a LAB
-  if (data.type === 'LAB') {
-    try {
-      await syncLabEntry({
-        subjectCode: code,
-        subjectName: data.subjectName,
-        type: 'LAB',
-        weeklyHours: data.weeklyHours || 2,
-        department: data.department,
-        active: data.active,
-      });
-    } catch (err) {
-      console.warn('Auto-sync lab error on createSubject:', err);
-    }
-  }
-
-  return docRef.id;
-};
-
-export const upsertSubject = async (data: Omit<Subject, 'id'>): Promise<string> => {
-  const code = data.subjectCode.trim().toUpperCase();
-  const existing = await getSubjectByCode(code);
-  
-  if (existing && existing.id) {
-    const docRef = doc(db, SUBJECTS_COLLECTION, existing.id);
-    const existingStaff = Array.isArray(existing.assignedStaff) ? existing.assignedStaff : [];
-    const newStaff = Array.isArray(data.assignedStaff) ? data.assignedStaff : [];
-    const mergedStaff = Array.from(new Set([...existingStaff, ...newStaff]));
-
-    await updateDoc(docRef, {
-      subjectName: data.subjectName ? data.subjectName.trim() : existing.subjectName,
-      type: data.type || existing.type || 'THEORY',
-      weeklyHours: data.weeklyHours ?? existing.weeklyHours ?? (data.type === 'LAB' ? 2 : 4),
-      assignedStaff: mergedStaff.length > 0 ? mergedStaff : existingStaff,
-      department: data.department || existing.department || 'Computer Science & Engineering',
-      year: data.year || existing.year || 'III',
-      semester: data.semester || existing.semester || '5',
-      active: true,
+  try {
+    const subjectsRef = collection(db, SUBJECTS_COLLECTION);
+    const docRef = await addDoc(subjectsRef, {
+      subjectCode: code,
+      subjectName: data.subjectName.trim(),
+      type: data.type || 'THEORY',
+      weeklyHours: data.weeklyHours ?? (data.type === 'LAB' ? 2 : 4),
+      assignedStaff: data.assignedStaff || [],
+      department: data.department || 'Computer Science & Engineering',
+      year: data.year || 'III',
+      semester: data.semester || '5',
+      active: data.active !== undefined ? data.active : true,
+      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
 
-    if (data.type === 'LAB' || existing.type === 'LAB') {
+    // Automatically sync to labs collection if this is a LAB
+    if (data.type === 'LAB') {
       try {
         await syncLabEntry({
           subjectCode: code,
-          subjectName: data.subjectName || existing.subjectName,
-          type: data.type || existing.type,
-          weeklyHours: data.weeklyHours ?? existing.weeklyHours ?? 2,
-          department: data.department || existing.department,
-          active: true,
+          subjectName: data.subjectName,
+          type: 'LAB',
+          weeklyHours: data.weeklyHours || 2,
+          department: data.department,
+          active: data.active,
         });
       } catch (err) {
-        console.warn('Auto-sync lab error on upsertSubject:', err);
+        console.warn('Auto-sync lab notice:', err);
       }
     }
 
-    return existing.id;
+    return docRef.id;
+  } catch (error) {
+    throw handleFirestoreError(error, FirestoreOperationType.CREATE, SUBJECTS_COLLECTION);
   }
-
-  const subjectsRef = collection(db, SUBJECTS_COLLECTION);
-  const docRef = await addDoc(subjectsRef, {
-    subjectCode: code,
-    subjectName: data.subjectName.trim(),
-    type: data.type || 'THEORY',
-    weeklyHours: data.weeklyHours ?? (data.type === 'LAB' ? 2 : 4),
-    assignedStaff: data.assignedStaff || [],
-    department: data.department || 'Computer Science & Engineering',
-    year: data.year || 'III',
-    semester: data.semester || '5',
-    active: data.active !== undefined ? data.active : true,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-
-  if (data.type === 'LAB') {
-    try {
-      await syncLabEntry({
-        subjectCode: code,
-        subjectName: data.subjectName,
-        type: 'LAB',
-        weeklyHours: data.weeklyHours || 2,
-        department: data.department,
-        active: data.active,
-      });
-    } catch (err) {
-      console.warn('Auto-sync lab error on upsertSubject new:', err);
-    }
-  }
-
-  return docRef.id;
 };
 
 export const updateSubject = async (id: string, data: Partial<Subject>): Promise<void> => {
@@ -232,10 +182,16 @@ export const updateSubject = async (id: string, data: Partial<Subject>): Promise
     }
   }
 
-  // Get current doc to know previous code/type
   const docRef = doc(db, SUBJECTS_COLLECTION, id);
-  const existingDoc = await getDoc(docRef);
-  const existingData = existingDoc.exists() ? (existingDoc.data() as Subject) : null;
+  let existingData: Subject | null = null;
+  try {
+    const existingDoc = await getDoc(docRef);
+    if (existingDoc.exists()) {
+      existingData = existingDoc.data() as Subject;
+    }
+  } catch {
+    // continue
+  }
 
   const updateData: any = {
     ...data,
@@ -245,7 +201,11 @@ export const updateSubject = async (id: string, data: Partial<Subject>): Promise
   if (data.subjectCode) updateData.subjectCode = data.subjectCode.trim().toUpperCase();
   if (data.subjectName) updateData.subjectName = data.subjectName.trim();
 
-  await updateDoc(docRef, updateData);
+  try {
+    await updateDoc(docRef, updateData);
+  } catch (error) {
+    throw handleFirestoreError(error, FirestoreOperationType.UPDATE, `${SUBJECTS_COLLECTION}/${id}`);
+  }
 
   const effectiveCode = (data.subjectCode || existingData?.subjectCode || '').trim().toUpperCase();
   const effectiveName = data.subjectName || existingData?.subjectName || '';
@@ -262,15 +222,14 @@ export const updateSubject = async (id: string, data: Partial<Subject>): Promise
           department: data.department || existingData?.department,
           active: data.active !== undefined ? data.active : existingData?.active,
         });
-      } catch (err) {
-        console.warn('Auto-sync lab on updateSubject error:', err);
+      } catch {
+        // ignore
       }
     } else if (existingData?.type === 'LAB') {
-      // It was changed from LAB to non-LAB, delete corresponding lab
       try {
         await deleteDoc(doc(db, LABS_COLLECTION, `lab_${effectiveCode}`));
-      } catch (err) {
-        console.warn('Cleanup lab on subject type change error:', err);
+      } catch {
+        // ignore
       }
     }
   }
@@ -278,29 +237,53 @@ export const updateSubject = async (id: string, data: Partial<Subject>): Promise
 
 export const deleteSubject = async (id: string): Promise<void> => {
   const docRef = doc(db, SUBJECTS_COLLECTION, id);
-  const existingDoc = await getDoc(docRef);
-  const existingData = existingDoc.exists() ? (existingDoc.data() as Subject) : null;
+  let existingData: Subject | null = null;
+  try {
+    const existingDoc = await getDoc(docRef);
+    if (existingDoc.exists()) {
+      existingData = existingDoc.data() as Subject;
+    }
+  } catch {
+    // continue
+  }
 
-  await deleteDoc(docRef);
+  try {
+    await deleteDoc(docRef);
+  } catch (error) {
+    throw handleFirestoreError(error, FirestoreOperationType.DELETE, `${SUBJECTS_COLLECTION}/${id}`);
+  }
 
   if (existingData && existingData.subjectCode) {
     try {
       const code = existingData.subjectCode.trim().toUpperCase();
       await deleteDoc(doc(db, LABS_COLLECTION, `lab_${code}`));
-    } catch (err) {
-      console.warn('Delete synced lab error:', err);
+    } catch {
+      // ignore
     }
   }
 };
 
 export const assignStaffToSubject = async (subjectId: string, staffCodes: string[]): Promise<void> => {
-  const docRef = doc(db, SUBJECTS_COLLECTION, subjectId);
-  await updateDoc(docRef, {
-    assignedStaff: staffCodes,
-    updatedAt: serverTimestamp(),
-  });
+  try {
+    const docRef = doc(db, SUBJECTS_COLLECTION, subjectId);
+    await updateDoc(docRef, {
+      assignedStaff: staffCodes,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    throw handleFirestoreError(error, FirestoreOperationType.UPDATE, `${SUBJECTS_COLLECTION}/${subjectId}`);
+  }
+};
+
+export const upsertSubject = async (data: Omit<Subject, 'id'>): Promise<string> => {
+  const code = data.subjectCode.trim().toUpperCase();
+  const existing = await getSubjectByCode(code);
+  if (existing) {
+    await updateSubject(existing.id, data);
+    return existing.id;
+  } else {
+    return await createSubject(data);
+  }
 };
 
 export const getSubjects = getAllSubjects;
-
-

@@ -14,7 +14,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/firebase/firestore';
 import { Timetable, ValidationResult, TimetableStatus, Subject, Room, TimetableEntry, TimetableChangeLog, ExtractedTimetableImageResult, TimetableStats, StaffProfile } from '@/types/timetable';
-import { getAllStaff } from './staffService';
+import { getAllStaff, defaultMasterStaff } from './staffService';
 import { getAllSubjects } from './subjectService';
 import { getAllLabs } from './labService';
 import { getAllRooms } from './roomService';
@@ -277,7 +277,10 @@ const enrichTimetableWithStaff = (timetable: Timetable, staffMap: Map<string, st
 };
 
 export const getAllTimetables = async (): Promise<Timetable[]> => {
-  await waitForAuth();
+  const user = await waitForAuth();
+  if (!user || !user.uid) {
+    return [];
+  }
   const localList = getLocalTimetables();
   try {
     const [timetablesSnap, staffList] = await Promise.all([
@@ -306,9 +309,9 @@ export const getAllTimetables = async (): Promise<Timetable[]> => {
     firestoreTimetables.forEach(t => saveLocalTimetable(t));
 
     return merged.length > 0 ? merged : localList.map(t => enrichTimetableWithStaff(t, staffMap));
-  } catch (error) {
-    console.warn('Notice fetching timetables from Firestore, using local timetable storage:', error);
-    const staffList = await getAllStaff().catch(() => []);
+  } catch (error: any) {
+    console.warn('[timetableService] Notice reading timetables from Firestore, using local cached store:', error?.message || error);
+    const staffList = await getAllStaff().catch(() => defaultMasterStaff);
     const staffMap = new Map<string, string>();
     staffList.forEach(s => staffMap.set(s.staffCode.toUpperCase(), s.name));
     return localList.map(t => enrichTimetableWithStaff(t, staffMap));
@@ -316,6 +319,8 @@ export const getAllTimetables = async (): Promise<Timetable[]> => {
 };
 
 export const getTimetableById = async (id: string): Promise<Timetable | null> => {
+  const user = await waitForAuth();
+  if (!user || !user.uid) return null;
   try {
     const docRef = doc(db, TIMETABLES_COLLECTION, id);
     const [docSnap, staffList] = await Promise.all([
@@ -709,7 +714,7 @@ export const getMyStaffTimetable = async (staffId: string, year?: string): Promi
     }
     return null;
   } catch (err) {
-    console.error('Error fetching staff timetable from Firestore:', err);
+    console.warn('Notice fetching staff timetable from Firestore:', err);
     return null;
   }
 };
@@ -744,7 +749,7 @@ export const subscribeToMyStaffTimetable = (
       onUpdate(null);
     },
     (err) => {
-      console.error('Error subscribing to staff timetable:', err);
+      console.warn('Notice subscribing to staff timetable:', err);
       onUpdate(null);
     }
   );
@@ -1032,7 +1037,7 @@ export const getLatestTimetable = async (): Promise<Timetable | null> => {
     const list = await getAllTimetables();
     return list.length > 0 ? list[0] : null;
   } catch (error) {
-    console.error('Error fetching latest timetable:', error);
+    console.warn('Notice fetching latest timetable:', error);
     return null;
   }
 };

@@ -60,6 +60,7 @@ export default function AdminUsers() {
 
   // Real-time listener for active sessions
   useEffect(() => {
+    if (authLoading || !currentUser) return;
     fetchActiveSessions();
 
     const unsubscribe = subscribeToActiveSessions((updatedSessions) => {
@@ -74,10 +75,11 @@ export default function AdminUsers() {
       unsubscribe();
       clearInterval(interval);
     };
-  }, [fetchActiveSessions]);
+  }, [authLoading, currentUser, fetchActiveSessions]);
 
   // Fetch all users (for All Accounts tab)
   const fetchAllUsers = useCallback(async () => {
+    if (authLoading || !currentUser) return;
     setAllLoading(true);
     try {
       const usersData = await getAllUsers();
@@ -88,13 +90,13 @@ export default function AdminUsers() {
     } finally {
       setAllLoading(false);
     }
-  }, []);
+  }, [authLoading, currentUser]);
 
   useEffect(() => {
-    if (activeTab === 'all') {
+    if (activeTab === 'all' && !authLoading && currentUser) {
       fetchAllUsers();
     }
-  }, [activeTab, fetchAllUsers]);
+  }, [activeTab, authLoading, currentUser, fetchAllUsers]);
 
   // Handle Revoking / Removing a user
   const handleConfirmRevoke = async () => {
@@ -510,9 +512,9 @@ export default function AdminUsers() {
         title="Revoke User Access Immediately?"
         itemName={userToRevoke?.name || userToRevoke?.email || 'this user'}
         description="This will immediately terminate their active session, kick them out to the Login page, and prevent any further access until an administrator re-authorizes the account."
-        isLoading={revokeLoading}
+        isDeleting={revokeLoading}
         onConfirm={handleConfirmRevoke}
-        onCancel={() => setUserToRevoke(null)}
+        onClose={() => setUserToRevoke(null)}
       />
     </div>
   );

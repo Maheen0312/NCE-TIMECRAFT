@@ -84,7 +84,7 @@ export const getNotifications = async (
       return n.userId === 'ALL' || n.userId === userId;
     });
   } catch (error) {
-    console.error('Error fetching notifications:', error);
+    console.warn('Notice fetching notifications:', error);
     return [];
   }
 };

@@ -1,6 +1,7 @@
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/firebase/firestore';
 import { SchedulingRules } from '@/types/timetable';
+import { waitForAuth } from '@/firebase/auth';
 
 export type { SchedulingRules };
 
@@ -18,6 +19,11 @@ export const defaultRules: SchedulingRules = {
 };
 
 export const getSchedulingRules = async (): Promise<SchedulingRules> => {
+  const user = await waitForAuth();
+  if (!user || !user.uid) {
+    return defaultRules;
+  }
+
   try {
     const docRef = doc(db, RULES_COLLECTION, DEFAULT_RULES_DOC);
     const docSnap = await getDoc(docRef);
@@ -26,12 +32,17 @@ export const getSchedulingRules = async (): Promise<SchedulingRules> => {
     }
     return defaultRules;
   } catch (error) {
-    console.warn('Notice fetching scheduling rules from Firestore, falling back to default rules:', error);
+    console.warn('[rulesService] Notice reading scheduling rules from Firestore, using default rules:', error);
     return defaultRules;
   }
 };
 
 export const saveSchedulingRules = async (rules: Partial<SchedulingRules>): Promise<void> => {
+  const user = await waitForAuth();
+  if (!user || !user.uid) {
+    throw new Error('Authentication required to save scheduling rules');
+  }
+
   const docRef = doc(db, RULES_COLLECTION, DEFAULT_RULES_DOC);
   await setDoc(docRef, {
     ...defaultRules,

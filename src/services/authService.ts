@@ -136,7 +136,6 @@ export const login = async (email: string, password: string): Promise<{ profile:
       await setDoc(doc(db, 'users', userCred.user.uid), adminProfile);
       return { profile: adminProfile, firebaseUser: userCred.user };
     } catch (createErr: any) {
-      // If already created, try signIn again
       try {
         const userCred = await signInWithEmailAndPassword(auth, normalizedEmail, password);
         sessionStorage.setItem('nce_active_uid', userCred.user.uid);
@@ -148,64 +147,10 @@ export const login = async (email: string, password: string): Promise<{ profile:
     }
   }
 
-  // 2. Fallback Database Authentication in Firestore users collection (if client already authenticated)
-  try {
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('email', '==', normalizedEmail));
-    const snap = await getDocs(q);
-
-    if (snap.empty) {
-      const err: any = new Error('No account found with this email. Please check your credentials or create an account.');
-      err.code = 'auth/user-not-found';
-      throw err;
-    }
-
-    const userDoc = snap.docs[0];
-    const userData = userDoc.data() as UserProfile & { passwordHash?: string };
-
-    if (userData.active === false || (userData as any).accountStatus === 'removed' || userData.role === 'unauthorized') {
-      const err: any = new Error('Your account access has been removed by the administrator.');
-      err.code = 'auth/user-disabled';
-      throw err;
-    }
-
-    // Verify Password Hash
-    const inputHash = await hashPassword(password);
-    if (userData.passwordHash) {
-      if (userData.passwordHash !== inputHash) {
-        const err: any = new Error('Invalid email or password.');
-        err.code = 'auth/wrong-password';
-        throw err;
-      }
-    } else {
-      await updateDoc(doc(db, 'users', userDoc.id), {
-        passwordHash: inputHash,
-        lastLogin: serverTimestamp()
-      }).catch(console.error);
-    }
-
-    const profile: UserProfile = {
-      uid: userDoc.id,
-      name: userData.name,
-      email: userData.email,
-      role: userData.role,
-      staffCode: userData.staffCode || null,
-      active: userData.active,
-      createdAt: userData.createdAt,
-      lastLogin: new Date().toISOString()
-    };
-
-    sessionStorage.setItem('nce_active_uid', userDoc.id);
-    await updateLastLogin(userDoc.id).catch(console.error);
-    return { profile };
-  } catch (dbErr: any) {
-    if (dbErr?.code === 'auth/user-not-found' || dbErr?.code === 'auth/wrong-password' || dbErr?.code === 'auth/user-disabled') {
-      throw dbErr;
-    }
-    const genericErr: any = new Error('Invalid email or password. Please verify your credentials.');
-    genericErr.code = 'auth/invalid-credential';
-    throw genericErr;
-  }
+  // If not signed in by Firebase Auth, fail cleanly without unauthorized queries
+  const invalidCredErr: any = new Error('Invalid email or password. Please verify your credentials.');
+  invalidCredErr.code = 'auth/invalid-credential';
+  throw invalidCredErr;
 };
 
 export const setupAccount = async (

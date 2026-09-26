@@ -18,8 +18,7 @@ export default function AdminRules() {
       const data = await getSchedulingRules();
       setRules(data);
     } catch (error) {
-      console.error('Failed to load rules:', error);
-      toast.error('Failed to load rules');
+      console.warn('Notice loading rules:', error);
     } finally {
       setLoading(false);
     }

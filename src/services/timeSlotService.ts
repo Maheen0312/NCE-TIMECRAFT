@@ -25,26 +25,41 @@ export const defaultMasterTimeSlots: Omit<TimeSlot, 'id'>[] = [
   { day: 'Monday', startTime: '03:20', endTime: '04:20', type: 'CLASS', order: 8, active: true },
 ];
 
+let pendingTimeSlotsPromise: Promise<TimeSlot[]> | null = null;
+
 export const getAllTimeSlots = async (): Promise<TimeSlot[]> => {
-  await waitForAuth();
-  try {
-    const slotsRef = collection(db, SLOTS_COLLECTION);
-    const querySnapshot = await getDocs(slotsRef);
-    const slots = querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    } as TimeSlot));
-
-    if (slots.length === 0) {
-      // Return default template
-      return defaultMasterTimeSlots.map((s, idx) => ({ id: `default_${idx}`, ...s }));
-    }
-
-    return slots.sort((a, b) => a.order - b.order);
-  } catch (error: any) {
-    console.error('[timeSlotService] Error fetching time slots from Firestore:', error);
+  const user = await waitForAuth();
+  if (!user || !user.uid) {
     return defaultMasterTimeSlots.map((s, idx) => ({ id: `default_${idx}`, ...s }));
   }
+
+  if (pendingTimeSlotsPromise) {
+    return pendingTimeSlotsPromise;
+  }
+
+  pendingTimeSlotsPromise = (async () => {
+    try {
+      const slotsRef = collection(db, SLOTS_COLLECTION);
+      const querySnapshot = await getDocs(slotsRef);
+      const slots = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as TimeSlot));
+
+      if (slots.length === 0) {
+        return defaultMasterTimeSlots.map((s, idx) => ({ id: `default_${idx}`, ...s }));
+      }
+
+      return slots.sort((a, b) => a.order - b.order);
+    } catch (error: any) {
+      console.warn('[timeSlotService] Notice reading time slots from Firestore, using institutional slots:', error?.message || error);
+      return defaultMasterTimeSlots.map((s, idx) => ({ id: `default_${idx}`, ...s }));
+    } finally {
+      pendingTimeSlotsPromise = null;
+    }
+  })();
+
+  return pendingTimeSlotsPromise;
 };
 
 export const saveTimeSlot = async (data: Omit<TimeSlot, 'id'>): Promise<string> => {
@@ -68,4 +83,3 @@ export const deleteTimeSlot = async (id: string): Promise<void> => {
 };
 
 export const getTimeSlots = getAllTimeSlots;
-

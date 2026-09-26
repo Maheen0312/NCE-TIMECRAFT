@@ -13,8 +13,10 @@ import { useYearFilter } from '@/contexts/YearFilterContext';
 import { matchYear, CanonicalYear } from '@/utils/yearUtils';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AdminLabs() {
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [labs, setLabs] = useState<Lab[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [staffList, setStaffList] = useState<StaffProfile[]>([]);
@@ -48,6 +50,7 @@ export default function AdminLabs() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchLabs = async () => {
+    if (authLoading || !isAuthenticated) return;
     setLoading(true);
     try {
       const [labsData, subsData, staffData] = await Promise.all([
@@ -59,16 +62,17 @@ export default function AdminLabs() {
       setSubjects(subsData);
       setStaffList(staffData);
     } catch (error) {
-      console.error('Failed to fetch labs:', error);
-      toast.error('Failed to load laboratories');
+      console.warn('Notice fetching labs:', error);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchLabs();
-  }, []);
+    if (!authLoading && isAuthenticated) {
+      fetchLabs();
+    }
+  }, [authLoading, isAuthenticated]);
 
   const handleSyncLabs = async () => {
     setIsSyncing(true);

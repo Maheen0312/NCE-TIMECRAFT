@@ -13,8 +13,10 @@ import { useYearFilter } from '@/contexts/YearFilterContext';
 import { matchYear, CanonicalYear } from '@/utils/yearUtils';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AdminSubjects() {
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [staffList, setStaffList] = useState<StaffProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +52,7 @@ export default function AdminSubjects() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchData = async () => {
+    if (authLoading || !isAuthenticated) return;
     setLoading(true);
     try {
       const [subs, staff] = await Promise.all([
@@ -59,16 +62,17 @@ export default function AdminSubjects() {
       setSubjects(subs);
       setStaffList(staff);
     } catch (error) {
-      console.error('Failed to fetch subjects data:', error);
-      toast.error('Failed to load subjects data');
+      console.warn('Notice fetching subjects data:', error);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (!authLoading && isAuthenticated) {
+      fetchData();
+    }
+  }, [authLoading, isAuthenticated]);
 
   const handleOpenAdd = () => {
     const activeY = viewYearFilter !== 'ALL' ? viewYearFilter : selectedYear;

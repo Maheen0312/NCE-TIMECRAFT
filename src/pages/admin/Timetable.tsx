@@ -82,9 +82,11 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AdminTimetable() {
   const navigate = useNavigate();
+  const { isAuthenticated, loading: authLoading } = useAuth();
 
   // Primary data states
   const [timetables, setTimetables] = useState<Timetable[]>([]);
@@ -136,6 +138,7 @@ export default function AdminTimetable() {
 
   // Fetch initial data
   const fetchData = async () => {
+    if (authLoading || !isAuthenticated) return;
     setLoading(true);
     try {
       const [tList, subList, sList, rList] = await Promise.all([
@@ -161,16 +164,17 @@ export default function AdminTimetable() {
         setVersions(vList);
       }
     } catch (error) {
-      console.error('Failed to load timetable data:', error);
-      toast.error('Failed to load timetables');
+      console.warn('Notice loading timetable data:', error);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (!authLoading && isAuthenticated) {
+      fetchData();
+    }
+  }, [authLoading, isAuthenticated]);
 
   // Update versions whenever selected timetable changes
   useEffect(() => {

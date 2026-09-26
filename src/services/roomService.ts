@@ -27,34 +27,57 @@ const defaultMasterRooms: Room[] = MASTER_ROOMS.map(r => ({
   active: true,
 }));
 
-export const getAllRooms = async (): Promise<Room[]> => {
-  await waitForAuth();
-  try {
-    const roomsRef = collection(db, ROOMS_COLLECTION);
-    const querySnapshot = await getDocs(roomsRef);
-    const rawRooms = querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    } as Room));
+let pendingRoomsPromise: Promise<Room[]> | null = null;
 
-    // Deduplicate by normalized roomNumber
-    const seen = new Set<string>();
-    const uniqueRooms: Room[] = [];
-    for (const r of rawRooms) {
-      const code = (r.roomNumber || r.id).trim().toUpperCase();
-      if (!seen.has(code)) {
-        seen.add(code);
-        uniqueRooms.push(r);
-      }
-    }
-    return uniqueRooms.length > 0 ? uniqueRooms : defaultMasterRooms;
-  } catch (error) {
-    console.warn('Notice fetching rooms from Firestore, falling back to master rooms configuration:', error);
-    return defaultMasterRooms;
+export const getAllRooms = async (): Promise<Room[]> => {
+  const user = await waitForAuth();
+  if (!user || !user.uid) {
+    return [];
   }
+
+  if (pendingRoomsPromise) {
+    return pendingRoomsPromise;
+  }
+
+  pendingRoomsPromise = (async () => {
+    try {
+      const roomsRef = collection(db, ROOMS_COLLECTION);
+      const querySnapshot = await getDocs(roomsRef);
+      const rawRooms = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as Room));
+
+      if (rawRooms.length === 0) {
+        return defaultMasterRooms;
+      }
+
+      // Deduplicate by normalized roomNumber
+      const seen = new Set<string>();
+      const uniqueRooms: Room[] = [];
+      for (const r of rawRooms) {
+        const code = (r.roomNumber || r.id).trim().toUpperCase();
+        if (!seen.has(code)) {
+          seen.add(code);
+          uniqueRooms.push(r);
+        }
+      }
+      return uniqueRooms;
+    } catch (error: any) {
+      console.warn('[roomService] Notice reading rooms from Firestore, using institutional list:', error?.message || error);
+      return defaultMasterRooms;
+    } finally {
+      pendingRoomsPromise = null;
+    }
+  })();
+
+  return pendingRoomsPromise;
 };
 
 export const getRoomByNumber = async (roomNumber: string): Promise<Room | null> => {
+  const user = await waitForAuth();
+  if (!user || !user.uid) return null;
+
   try {
     const roomsRef = collection(db, ROOMS_COLLECTION);
     const q = query(roomsRef, where('roomNumber', '==', roomNumber));
@@ -65,7 +88,7 @@ export const getRoomByNumber = async (roomNumber: string): Promise<Room | null> 
     }
     return null;
   } catch (error) {
-    console.error('Error fetching room by number:', error);
+    console.warn('Notice fetching room by number:', error);
     return null;
   }
 };
@@ -103,4 +126,3 @@ export const deleteRoom = async (id: string): Promise<void> => {
 };
 
 export const getRooms = getAllRooms;
-

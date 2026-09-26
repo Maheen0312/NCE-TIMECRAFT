@@ -8,8 +8,10 @@ import { seedInitialDataset } from '@/services/seedService';
 import { DeleteConfirmModal } from '@/components/ui/DeleteConfirmModal';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AdminRooms() {
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -33,21 +35,23 @@ export default function AdminRooms() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchRooms = async () => {
+    if (authLoading || !isAuthenticated) return;
     setLoading(true);
     try {
       const data = await getAllRooms();
       setRooms(data);
     } catch (error) {
-      console.error('Failed to fetch rooms:', error);
-      toast.error('Failed to load rooms');
+      console.warn('Notice fetching rooms:', error);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchRooms();
-  }, []);
+    if (!authLoading && isAuthenticated) {
+      fetchRooms();
+    }
+  }, [authLoading, isAuthenticated]);
 
   const handleOpenAdd = () => {
     setEditingRoom(null);

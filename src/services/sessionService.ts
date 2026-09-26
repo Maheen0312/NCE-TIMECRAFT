@@ -7,10 +7,10 @@ import {
   deleteDoc, 
   query, 
   where, 
-  serverTimestamp,
-  Timestamp,
-  onSnapshot,
-  Unsubscribe
+  serverTimestamp, 
+  Timestamp, 
+  onSnapshot, 
+  Unsubscribe 
 } from 'firebase/firestore';
 import { db } from '@/firebase/firestore';
 import { auth, waitForAuth } from '@/firebase/auth';
@@ -45,7 +45,7 @@ export const startUserSession = async (userData: {
   staffCode?: string | null;
   department?: string | null;
 }): Promise<void> => {
-  if (!userData.uid) return;
+  if (!userData.uid || !auth.currentUser || auth.currentUser.uid !== userData.uid) return;
 
   const sessionData: UserSession = {
     uid: userData.uid,
@@ -65,7 +65,7 @@ export const startUserSession = async (userData: {
     const sessionRef = doc(db, SESSIONS_COLLECTION, userData.uid);
     await setDoc(sessionRef, sessionData, { merge: true });
   } catch (err) {
-    console.warn('Notice starting user session in Firestore:', err);
+    // Network jitter resilience
   }
 
   // Also notify server-side registry
@@ -84,7 +84,7 @@ export const startUserSession = async (userData: {
  * Sends a periodic heartbeat to keep the user's presence active
  */
 export const sendHeartbeat = async (uid: string): Promise<void> => {
-  if (!uid) return;
+  if (!uid || !auth.currentUser || auth.currentUser.uid !== uid) return;
 
   try {
     const sessionRef = doc(db, SESSIONS_COLLECTION, uid);
@@ -94,7 +94,7 @@ export const sendHeartbeat = async (uid: string): Promise<void> => {
       updatedAt: serverTimestamp(),
     }, { merge: true });
   } catch (err) {
-    console.warn('Notice sending heartbeat to Firestore:', err);
+    // silently ignore network jitter
   }
 
   try {
@@ -114,15 +114,17 @@ export const sendHeartbeat = async (uid: string): Promise<void> => {
 export const endUserSession = async (uid: string): Promise<void> => {
   if (!uid) return;
 
-  try {
-    const sessionRef = doc(db, SESSIONS_COLLECTION, uid);
-    await setDoc(sessionRef, {
-      active: false,
-      lastSeen: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-  } catch (err) {
-    console.warn('Notice ending user session in Firestore:', err);
+  if (auth.currentUser && auth.currentUser.uid === uid) {
+    try {
+      const sessionRef = doc(db, SESSIONS_COLLECTION, uid);
+      await setDoc(sessionRef, {
+        active: false,
+        lastSeen: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    } catch {
+      // ignore
+    }
   }
 
   try {
@@ -169,11 +171,14 @@ export const isSessionRecentlyActive = (lastSeen: any): boolean => {
  * Fetches all currently active / logged in user sessions
  */
 export const getActiveUserSessions = async (): Promise<UserSession[]> => {
-  await waitForAuth();
+  const user = await waitForAuth();
+  if (!user || !user.uid) {
+    return [];
+  }
 
   const activeSessions: UserSession[] = [];
 
-  // Try Firestore userSessions collection first
+  // Query Firestore userSessions collection
   try {
     const sessionsRef = collection(db, SESSIONS_COLLECTION);
     const q = query(sessionsRef, where('active', '==', true));
@@ -190,7 +195,7 @@ export const getActiveUserSessions = async (): Promise<UserSession[]> => {
       return activeSessions;
     }
   } catch (err) {
-    console.warn('Notice querying active sessions from Firestore:', err);
+    console.warn('[sessionService] Firestore sessions query note:', err);
   }
 
   // Fallback to server-side session registry
@@ -230,6 +235,10 @@ export const getActiveUserSessions = async (): Promise<UserSession[]> => {
 export const subscribeToActiveSessions = (
   callback: (sessions: UserSession[]) => void
 ): Unsubscribe => {
+  if (!auth.currentUser) {
+    return () => {};
+  }
+
   try {
     const sessionsRef = collection(db, SESSIONS_COLLECTION);
     const q = query(sessionsRef, where('active', '==', true));
@@ -244,10 +253,9 @@ export const subscribeToActiveSessions = (
       });
       callback(currentActive);
     }, (err) => {
-      console.warn('Notice listening to active sessions:', err);
+      console.warn('[sessionService] Session listener note:', err);
     });
   } catch (err) {
-    console.warn('Notice setting up session listener:', err);
     return () => {};
   }
 };

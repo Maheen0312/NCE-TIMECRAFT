@@ -7,8 +7,10 @@ import { getAllTimeSlots, saveTimeSlot, updateTimeSlot, deleteTimeSlot, defaultM
 import { TimeSlot } from '@/types/timetable';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AdminTimeSlots() {
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [slots, setSlots] = useState<TimeSlot[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -31,21 +33,23 @@ export default function AdminTimeSlots() {
   });
 
   const fetchSlots = async () => {
+    if (authLoading || !isAuthenticated) return;
     setLoading(true);
     try {
       const data = await getAllTimeSlots();
       setSlots(data);
     } catch (error) {
-      console.error('Failed to fetch time slots:', error);
-      toast.error('Failed to load period structure');
+      console.warn('Notice fetching time slots:', error);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchSlots();
-  }, []);
+    if (!authLoading && isAuthenticated) {
+      fetchSlots();
+    }
+  }, [authLoading, isAuthenticated]);
 
   const handleOpenAdd = () => {
     setEditingSlot(null);

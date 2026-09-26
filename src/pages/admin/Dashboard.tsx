@@ -39,9 +39,11 @@ import { toast } from 'react-hot-toast';
 import { ConfirmModal } from '@/components/common/ConfirmModal';
 import { PageLoader } from '@/components/common/Skeletons';
 import { resolveTimetableAcademicYear } from '@/utils/dateUtils';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
+  const { isAuthenticated, loading: authLoading } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
@@ -59,6 +61,7 @@ export default function AdminDashboard() {
   const [publishing, setPublishing] = useState(false);
 
   const fetchDashboardData = async () => {
+    if (authLoading || !isAuthenticated) return;
     setLoading(true);
     try {
       const [staff, subjects, labs, rooms, timetables, slots] = await Promise.all([
@@ -93,15 +96,17 @@ export default function AdminDashboard() {
         publishedCount: published.length,
       });
     } catch (error) {
-      console.error('Failed to load dashboard data:', error);
+      console.warn('Notice loading dashboard data:', error);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+    if (!authLoading && isAuthenticated) {
+      fetchDashboardData();
+    }
+  }, [authLoading, isAuthenticated]);
 
   const handleSeed = async () => {
     try {

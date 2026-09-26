@@ -3,138 +3,171 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isAuthenticated() {
+    // Helper functions
+    function isSignedIn() {
       return request.auth != null && request.auth.uid != null;
     }
 
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function hasUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
     function isEmailAdmin() {
-      return isAuthenticated() && 
-        request.auth.token != null &&
-        'email' in request.auth.token &&
+      return isSignedIn() &&
         request.auth.token.email != null &&
         (
           request.auth.token.email == 'admin@nce.edu' ||
           request.auth.token.email == 'maheenmohideen@gmail.com' ||
           request.auth.token.email == 'synedcdev@gmail.com' ||
+          request.auth.token.email == 'admin@nce.ac.in' ||
+          request.auth.token.email == 'hodcse@nce.ac.in' ||
           request.auth.token.email.matches('.*admin.*@.*') ||
-          request.auth.token.email.matches('.*@nce\\.edu')
+          request.auth.token.email.matches('.*@nce\\.edu') ||
+          request.auth.token.email.matches('.*@nce\\.ac\\.in')
         );
     }
 
-    function isDocAdmin() {
-      return isAuthenticated() && (
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         'role' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'Admin', 'ADMIN', 'administrator', 'Administrator']) ||
-        (exists(/databases/$(database)/documents/staff/$(request.auth.uid)) &&
-         'role' in get(/databases/$(database)/documents/staff/$(request.auth.uid)).data &&
-         get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role in ['admin', 'Admin', 'ADMIN', 'administrator', 'Administrator'])
-      );
+    function isRoleAdmin() {
+      return hasUserDoc() &&
+        (
+          getUserData().role == 'admin' ||
+          getUserData().role == 'Admin' ||
+          getUserData().role == 'ADMIN' ||
+          getUserData().role == 'administrator' ||
+          getUserData().role == 'Administrator'
+        );
     }
 
     function isAdmin() {
-      return isEmailAdmin() || isDocAdmin();
+      return isSignedIn() && (isEmailAdmin() || isRoleAdmin());
+    }
+
+    function isStaffRole() {
+      return hasUserDoc() &&
+        (
+          getUserData().role == 'staff' ||
+          getUserData().role == 'Staff' ||
+          getUserData().role == 'STAFF' ||
+          getUserData().role == 'faculty' ||
+          getUserData().role == 'Faculty'
+        );
     }
 
     function isStaff() {
-      return isAuthenticated() && (
-        isAdmin() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         'role' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['staff', 'Staff', 'STAFF', 'faculty', 'Faculty']) ||
-        (exists(/databases/$(database)/documents/staff/$(request.auth.uid)) &&
-         'role' in get(/databases/$(database)/documents/staff/$(request.auth.uid)).data &&
-         get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role in ['staff', 'Staff', 'STAFF', 'faculty', 'Faculty'])
-      );
+      return isSignedIn() && (isAdmin() || isStaffRole());
     }
 
-    function isSelfStaffLink() {
-      return isAuthenticated() &&
-        request.auth.token.email != null &&
-        'email' in resource.data &&
-        resource.data.email == request.auth.token.email &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userId', 'updatedAt']) &&
-        request.resource.data.userId == request.auth.uid;
-    }
-
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
-    // Users Collection - users manage their own profile; admins may manage the directory
+    // 1. Users collection
     match /users/{userId} {
-      allow get: if isOwner(userId) || isAdmin();
+      allow get: if isSignedIn() && (isOwner(userId) || isEmailAdmin() || isRoleAdmin());
       allow list: if isAdmin();
-      allow create, update: if isOwner(userId) || isAdmin();
+      allow create: if isSignedIn() && (isOwner(userId) || isAdmin());
+      allow update: if isSignedIn() && (isOwner(userId) || isAdmin());
       allow delete: if isAdmin();
     }
-    
-    // User Sessions & Presence Collection - users heartbeat their own presence; admins manage active roster
+
+    // 2. User sessions & presence
     match /userSessions/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isOwner(userId) || isAdmin();
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (isOwner(userId) || isAdmin());
     }
-    
-    // Staff Collection - authenticated users may be checked against the roster during login;
-    // writes remain limited to admins or the user's own linked staff document.
+
+    // 3. Staff directory
     match /staff/{staffId} {
-      allow read: if isAuthenticated();
-      allow create: if isAdmin() || (isAuthenticated() && request.auth.uid == staffId);
-      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == staffId) || isSelfStaffLink();
-      allow delete: if isAdmin();
+      allow read: if isSignedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (isSignedIn() && (request.auth.uid == staffId || (resource != null && 'userId' in resource.data && resource.data.userId == request.auth.uid)));
+
+      // Staff published personal timetable slices
+      match /timetable/{timetableDocId} {
+        allow read: if isSignedIn();
+        allow write: if isAdmin();
+      }
     }
 
-    // Academic & Scheduling Collections - Authenticated users can read and manage schedules
-    match /departments/{deptId} {
-      allow read, write: if isAuthenticated();
-    }
-    
-    match /classes/{classId} {
-      allow read, write: if isAuthenticated();
-    }
-    
+    // 4. Subjects
     match /subjects/{subjectId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
-    
-    match /rooms/{roomId} {
-      allow read, write: if isAuthenticated();
-    }
-    
+
+    // 5. Labs
     match /labs/{labId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
-    
+
+    // 6. Rooms
+    match /rooms/{roomId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 7. Time Slots
     match /timeSlots/{slotId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
+    // 8. Special Sessions
     match /specialSessions/{sessionId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
+    // 9. Scheduling Rules
     match /schedulingRules/{ruleId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
-    
+
+    // 10. Timetables
     match /timetables/{timetableId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
+    // 11. Timetable Versions
     match /timetableVersions/{versionId} {
-      allow read, write: if isAuthenticated();
-    }
-    
-    match /settings/{settingId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
-    match /notifications/{notificationId} {
-      allow read, write: if isAuthenticated();
+    // 12. Departments & Classes
+    match /departments/{deptId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
-    
+
+    match /classes/{classId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 13. System Settings
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 14. Notifications
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // 15. Audit Logs
     match /audit_logs/{logId} {
-      allow read, create: if isAuthenticated();
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
       allow update, delete: if false;
     }
   }

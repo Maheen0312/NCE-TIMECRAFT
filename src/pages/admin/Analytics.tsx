@@ -36,17 +36,21 @@ import { getLabs } from '@/services/labService';
 import { getTimeSlots } from '@/services/timeSlotService';
 import { computeTimetableAnalytics } from '@/services/analyticsService';
 import { PageLoader, CardSkeleton } from '@/components/common/Skeletons';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AdminAnalytics() {
   const navigate = useNavigate();
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
   const [analytics, setAnalytics] = useState<TimetableAnalyticsData | null>(null);
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'STAFF' | 'SUBJECTS' | 'ROOMS' | 'LABS'>('OVERVIEW');
   const [staffSort, setStaffSort] = useState<'HIGH_HOURS' | 'LOW_HOURS' | 'FREE_PERIODS' | 'CONSECUTIVE'>('HIGH_HOURS');
 
   useEffect(() => {
-    loadAnalytics();
-  }, []);
+    if (!authLoading && isAuthenticated) {
+      loadAnalytics();
+    }
+  }, [authLoading, isAuthenticated]);
 
   const loadAnalytics = async () => {
     setLoading(true);

@@ -1,5 +1,6 @@
 import { doc, getDoc, updateDoc, serverTimestamp, collection, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '@/firebase/firestore';
+import { waitForAuth } from '@/firebase/auth';
 import { MASTER_STAFF } from '@/config/timetableConfig';
 
 export interface UserProfile {
@@ -135,6 +136,9 @@ export const mapFirestoreUserDoc = (id: string, data: any): UserProfile => {
 };
 
 export const getUserProfile = async (uid: string): Promise<UserProfile | null> => {
+  if (!uid) return null;
+  const user = await waitForAuth();
+  if (!user || !user.uid) return null;
   try {
     const docRef = doc(db, 'users', uid);
     const docSnap = await getDoc(docRef);
@@ -142,7 +146,7 @@ export const getUserProfile = async (uid: string): Promise<UserProfile | null> =
       return mapFirestoreUserDoc(docSnap.id, docSnap.data());
     }
   } catch (error) {
-    console.warn('Notice fetching user profile from Firestore, using local fallback:', error);
+    console.warn('[userService] Notice fetching user profile from Firestore:', error);
   }
 
   const localUsers = getLocalUsers();
@@ -150,13 +154,16 @@ export const getUserProfile = async (uid: string): Promise<UserProfile | null> =
 };
 
 export const updateLastLogin = async (uid: string): Promise<void> => {
+  if (!uid) return;
+  const user = await waitForAuth();
+  if (!user || !user.uid) return;
   try {
     const docRef = doc(db, 'users', uid);
     await updateDoc(docRef, {
       lastLogin: serverTimestamp()
     });
   } catch (error) {
-    console.warn('Notice updating last login in Firestore:', error);
+    console.warn('[userService] Notice updating last login in Firestore:', error);
   }
 
   const localList = getLocalUsers();
@@ -168,6 +175,11 @@ export const updateLastLogin = async (uid: string): Promise<void> => {
 };
 
 export const getAllUsers = async (): Promise<UserProfile[]> => {
+  const user = await waitForAuth();
+  if (!user || !user.uid) {
+    return [];
+  }
+
   let firestoreUsers: UserProfile[] = [];
   let firestoreError: any = null;
 

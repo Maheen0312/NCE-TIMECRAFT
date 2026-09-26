@@ -59,7 +59,7 @@ export const getCollegeSettings = async (): Promise<CollegeSettings> => {
     await setDoc(docRef, { ...defaultCollegeSettings, createdAt: serverTimestamp() });
     return defaultCollegeSettings;
   } catch (error) {
-    console.error('Error fetching college settings:', error);
+    console.warn('Notice reading college settings from Firestore, using default college settings:', error);
     return defaultCollegeSettings;
   }
 };

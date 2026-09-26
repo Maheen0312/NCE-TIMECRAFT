@@ -51,8 +51,7 @@ export default function StaffTimetable() {
       const staffTimetable = await getMyStaffTimetable(authorizedStaff.id, selectedCohort);
       setTimetable(staffTimetable);
     } catch (error) {
-      console.error('Failed to load staff timetable:', error);
-      toast.error('Failed to load personal schedule');
+      console.warn('Notice loading staff timetable:', error);
     } finally {
       setLoading(false);
     }

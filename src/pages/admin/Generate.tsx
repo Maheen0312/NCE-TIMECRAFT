@@ -33,6 +33,7 @@ import { useYearFilter } from '@/contexts/YearFilterContext';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
 import { Camera, GraduationCap } from 'lucide-react';
 import { CanonicalYear, matchYear, YEAR_CONFIGS, formatYearDisplay, subjectMatchesYearAndSem, getSemestersForYear } from '@/utils/yearUtils';
 
@@ -47,6 +48,7 @@ const generationSteps = [
 
 export default function AdminGenerate() {
   const navigate = useNavigate();
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const { selectedYear, setSelectedYear, yearConfig } = useYearFilter();
 
   const [department, setDepartment] = useState('Computer Science & Engineering');
@@ -108,16 +110,17 @@ export default function AdminGenerate() {
       setRooms(rList);
       setSpecialSessions(specList);
     } catch (error) {
-      console.error('Failed to load preflight data:', error);
-      toast.error('Failed to load system resources');
+      console.warn('Notice loading preflight data:', error);
     } finally {
       setLoadingPreflight(false);
     }
   };
 
   useEffect(() => {
-    fetchPreflightData();
-  }, []);
+    if (!authLoading && isAuthenticated) {
+      fetchPreflightData();
+    }
+  }, [authLoading, isAuthenticated]);
 
   const handleSeedData = async () => {
     setIsSeeding(true);

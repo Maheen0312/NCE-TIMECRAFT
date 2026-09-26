@@ -42,7 +42,7 @@ export const defaultNaanMudhalvan2ndYearSession: SpecialSession = {
   description: 'Tamil Nadu State Skill Initiative - 2nd Year Thursday Afternoon (Periods 5, 6, 7)',
 };
 
-export const defaultCareerGuidanceFinalYearSessions: SpecialSession[] = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => ({
+export const defaultCareerGuidanceFinalYearSessions: SpecialSession[] = (['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as const).map(day => ({
   name: 'Career Guidance & Placement Training',
   sessionName: 'Career Guidance & Placement Training',
   day,
@@ -63,48 +63,64 @@ export const defaultCareerGuidanceFinalYearSession = defaultCareerGuidanceFinalY
 export const defaultNaanMudhalvanSession = defaultNaanMudhalvan3rdYearSession;
 export const defaultCareerGuidanceSession = defaultCareerGuidanceFinalYearSession;
 
+let pendingSpecialSessionsPromise: Promise<SpecialSession[]> | null = null;
+
 export const getAllSpecialSessions = async (): Promise<SpecialSession[]> => {
   const defaultSessions: SpecialSession[] = [
     { id: 'naan_mudhalvan_3rd_year_default', ...defaultNaanMudhalvan3rdYearSession },
     { id: 'naan_mudhalvan_2nd_year_default', ...defaultNaanMudhalvan2ndYearSession },
-    ...defaultCareerGuidanceFinalYearSessions.map((s, idx) => ({
+    ...defaultCareerGuidanceFinalYearSessions.map((s) => ({
       id: `career_guidance_final_year_${s.day.toLowerCase()}_default`,
       ...s
     })),
   ];
 
-  await waitForAuth();
-  try {
-    const sessionsRef = collection(db, SESSIONS_COLLECTION);
-    const querySnapshot = await getDocs(sessionsRef);
-    const sessions = querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    } as SpecialSession));
-
-    if (sessions.length === 0) {
-      return defaultSessions;
-    }
-
-    // Ensure institutional defaults are included if missing for any year
-    const hasNM3 = sessions.some(s => s.year === 'III' && s.name?.toLowerCase().includes('naan'));
-    const hasNM2 = sessions.some(s => s.year === 'II' && s.name?.toLowerCase().includes('naan'));
-    const hasCG4 = sessions.some(s => s.year === 'IV' && (s.name?.toLowerCase().includes('career') || s.name?.toLowerCase().includes('placement')));
-
-    const result = [...sessions];
-    if (!hasNM3) result.push({ id: 'naan_mudhalvan_3rd_year_default', ...defaultNaanMudhalvan3rdYearSession });
-    if (!hasNM2) result.push({ id: 'naan_mudhalvan_2nd_year_default', ...defaultNaanMudhalvan2ndYearSession });
-    if (!hasCG4) {
-      defaultCareerGuidanceFinalYearSessions.forEach(s => {
-        result.push({ id: `career_guidance_final_year_${s.day.toLowerCase()}_default`, ...s });
-      });
-    }
-
-    return result;
-  } catch (error: any) {
-    console.error('[specialSessionService] Error fetching special sessions from Firestore:', error);
+  const user = await waitForAuth();
+  if (!user || !user.uid) {
     return defaultSessions;
   }
+
+  if (pendingSpecialSessionsPromise) {
+    return pendingSpecialSessionsPromise;
+  }
+
+  pendingSpecialSessionsPromise = (async () => {
+    try {
+      const sessionsRef = collection(db, SESSIONS_COLLECTION);
+      const querySnapshot = await getDocs(sessionsRef);
+      const sessions = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as SpecialSession));
+
+      if (sessions.length === 0) {
+        return defaultSessions;
+      }
+
+      // Ensure institutional defaults are included if missing for any year
+      const hasNM3 = sessions.some(s => s.year === 'III' && s.name?.toLowerCase().includes('naan'));
+      const hasNM2 = sessions.some(s => s.year === 'II' && s.name?.toLowerCase().includes('naan'));
+      const hasCG4 = sessions.some(s => s.year === 'IV' && (s.name?.toLowerCase().includes('career') || s.name?.toLowerCase().includes('placement')));
+
+      const result = [...sessions];
+      if (!hasNM3) result.push({ id: 'naan_mudhalvan_3rd_year_default', ...defaultNaanMudhalvan3rdYearSession });
+      if (!hasNM2) result.push({ id: 'naan_mudhalvan_2nd_year_default', ...defaultNaanMudhalvan2ndYearSession });
+      if (!hasCG4) {
+        defaultCareerGuidanceFinalYearSessions.forEach(s => {
+          result.push({ id: `career_guidance_final_year_${s.day.toLowerCase()}_default`, ...s });
+        });
+      }
+
+      return result;
+    } catch (error: any) {
+      console.warn('[specialSessionService] Notice reading special sessions from Firestore, using institutional defaults:', error?.message || error);
+      return defaultSessions;
+    } finally {
+      pendingSpecialSessionsPromise = null;
+    }
+  })();
+
+  return pendingSpecialSessionsPromise;
 };
 
 export const createSpecialSession = async (data: Omit<SpecialSession, 'id'>): Promise<string> => {

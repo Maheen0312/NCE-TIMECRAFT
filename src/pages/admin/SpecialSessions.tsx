@@ -11,8 +11,10 @@ import { useYearFilter } from '@/contexts/YearFilterContext';
 import { CanonicalYear, matchYear } from '@/utils/yearUtils';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AdminSpecialSessions() {
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [sessions, setSessions] = useState<SpecialSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -45,21 +47,23 @@ export default function AdminSpecialSessions() {
   });
 
   const fetchSessions = async () => {
+    if (authLoading || !isAuthenticated) return;
     setLoading(true);
     try {
       const data = await getAllSpecialSessions();
       setSessions(data);
     } catch (error) {
-      console.error('Failed to fetch special sessions:', error);
-      toast.error('Failed to load special sessions');
+      console.warn('Notice fetching special sessions:', error);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchSessions();
-  }, []);
+    if (!authLoading && isAuthenticated) {
+      fetchSessions();
+    }
+  }, [authLoading, isAuthenticated]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

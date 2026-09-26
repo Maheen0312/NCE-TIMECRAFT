@@ -7,6 +7,7 @@ import { printTimetable } from '@/utils/printUtils';
 import { formatYearDisplay, matchYear, YEAR_CONFIGS } from '@/utils/yearUtils';
 import { Calendar, Clock, Lock, Coffee, Utensils, Printer, Download, RefreshCw, Users, Building2, CheckCircle2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { useAuth } from '@/contexts/AuthContext';
 
 const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
@@ -23,11 +24,13 @@ const periodTimeDefinitions = [
 ];
 
 export default function StaffDepartmentTimetable() {
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [allPublished, setAllPublished] = useState<Timetable[]>([]);
   const [selectedYear, setSelectedYear] = useState<string>('III');
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
+    if (authLoading || !isAuthenticated) return;
     setLoading(true);
     try {
       const published = await getAllPublishedTimetables();
@@ -40,16 +43,17 @@ export default function StaffDepartmentTimetable() {
         }
       }
     } catch (e) {
-      console.error('Error fetching published department timetables:', e);
-      toast.error('Failed to load published timetables');
+      console.warn('Notice fetching published department timetables:', e);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    load();
-  }, []);
+    if (!authLoading && isAuthenticated) {
+      load();
+    }
+  }, [authLoading, isAuthenticated]);
 
   const activeTimetable = allPublished.find(t => matchYear(t.year, selectedYear)) || null;
 

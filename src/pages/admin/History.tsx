@@ -19,9 +19,11 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AdminHistory() {
   const navigate = useNavigate();
+  const { isAuthenticated, loading: authLoading } = useAuth();
   const [timetables, setTimetables] = useState<Timetable[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -35,6 +37,7 @@ export default function AdminHistory() {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const fetchHistory = async () => {
+    if (authLoading || !isAuthenticated) return;
     setLoading(true);
     try {
       const list = await getAllTimetables();
@@ -49,8 +52,10 @@ export default function AdminHistory() {
   };
 
   useEffect(() => {
-    fetchHistory();
-  }, []);
+    if (!authLoading && isAuthenticated) {
+      fetchHistory();
+    }
+  }, [authLoading, isAuthenticated]);
 
   const handleSelectAll = () => {
     const validIds = timetables.map(t => t.id!).filter(Boolean);

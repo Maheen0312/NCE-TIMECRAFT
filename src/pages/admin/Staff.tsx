@@ -71,8 +71,7 @@ export default function AdminStaff() {
       setStaffList(staffData);
       setSubjects(subjectsData);
     } catch (error) {
-      console.error('Failed to fetch staff:', error);
-      toast.error('Failed to load staff list');
+      console.warn('Notice fetching staff:', error);
     } finally {
       setLoading(false);
     }
